@@ -1,0 +1,8 @@
+node_modules
+.next
+.env
+tmp
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
+__MACOSX
