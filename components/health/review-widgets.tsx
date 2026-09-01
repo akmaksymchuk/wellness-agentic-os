@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { CircleCheckBig, PencilLine, ShieldAlert } from "lucide-react";
+import { BookOpen, ChevronDown, CircleCheckBig, PencilLine, ShieldAlert, Timer } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -143,5 +143,74 @@ export function RoundsIndicator({
         </span>
       </div>
     </div>
+  );
+}
+
+export function RoundsHistory({
+  rounds,
+}: {
+  rounds: Array<{
+    round: number;
+    review: { verdict: ReviewVerdict; score: number };
+  }>;
+}) {
+  if (!rounds.length) return null;
+
+  return (
+    <details className="group">
+      <summary className="text-muted-foreground hover:text-foreground focus-visible:ring-ring flex cursor-pointer list-none items-center justify-between gap-2 rounded-sm text-xs font-medium tracking-wide uppercase select-none focus-visible:ring-2 focus-visible:outline-none [&::-webkit-details-marker]:hidden">
+        <span className="flex items-center gap-2">
+          <ChevronDown
+            className="size-3.5 transition-transform duration-200 group-open:rotate-180 motion-reduce:transition-none"
+            aria-hidden="true"
+          />
+          История раундов
+        </span>
+        <span className="text-foreground font-semibold tracking-normal tabular-nums normal-case">
+          {rounds.length}
+        </span>
+      </summary>
+      <ol className="mt-3 space-y-2" aria-label="История раундов ревью">
+        {rounds.map((item) => (
+          <li key={item.round} className="text-foreground text-sm leading-relaxed">
+            Раунд {item.round} — {verdictConfig[item.review.verdict].label} — {item.review.score}
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
+function formatDuration(ms: number) {
+  if (ms < 1000) return `${Math.max(0, Math.round(ms))} мс`;
+  return `${(ms / 1000).toFixed(1)} с`;
+}
+
+export function RunMeta({
+  durationMs,
+  promptVersions,
+}: {
+  durationMs: number;
+  promptVersions: { coach: string; reviewer: string };
+}) {
+  return (
+    <dl className="text-muted-foreground grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+      <div className="flex items-center gap-2">
+        <dt className="flex items-center gap-1.5 font-medium tracking-wide uppercase">
+          <Timer className="size-3.5" aria-hidden="true" />
+          Время
+        </dt>
+        <dd className="text-foreground font-medium tabular-nums">{formatDuration(durationMs)}</dd>
+      </div>
+      <div className="flex items-center gap-2">
+        <dt className="flex items-center gap-1.5 font-medium tracking-wide uppercase">
+          <BookOpen className="size-3.5" aria-hidden="true" />
+          Промпты
+        </dt>
+        <dd className="text-foreground font-medium">
+          коуч {promptVersions.coach} · ревьюер {promptVersions.reviewer}
+        </dd>
+      </div>
+    </dl>
   );
 }

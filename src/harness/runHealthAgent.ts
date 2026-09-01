@@ -2,19 +2,30 @@ import { config as loadDotenv } from "dotenv";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createHealthCoachAgent, type PromptAgent } from "../agents/healthCoach";
-import { createSafetyReviewerAgent, type Review, ReviewSchema } from "../agents/safetyReviewer";
+import { createSafetyReviewerAgent } from "../agents/safetyReviewer";
 import { completeText } from "./completeText";
+import { ACTIVE_PROMPTS, loadPrompt, type PromptVersions } from "./promptVersions";
+import { createRoundLog, type RoundState } from "./rounds";
+import { summarizeScore } from "./score";
+import { ReviewSchema, normalizeReview, validateReview, type Review } from "./validateReview";
 
-const MAX_ROUNDS = 3;
+const DEFAULT_MAX_ROUNDS = 3;
+
+export type { RoundState, Review, PromptVersions };
 
 export type RunHealthAgentResult = {
   plan: string;
   review: Review;
-  rounds: number;
+  rounds: RoundState[];
+  finalScore: number;
+  improved: boolean;
+  promptVersions: PromptVersions;
+  durationMs: number;
 };
 
 export type RunHealthAgentOptions = {
   root?: string;
+  maxRounds?: number;
   onRound?: (round: number, review: Review) => void;
 };
 
@@ -45,11 +56,6 @@ function reviewTaskSafety(task: string): Review | null {
 const buildContext = (task: string, profile: string, log: string) =>
   `Задача пользователя:\n${task}\n\nПрофиль пользователя:\n${profile}\n\nДневник последних дней:\n${log}`.trim();
 
-function parseReview(raw: string) {
-  const json = raw.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "");
-  return ReviewSchema.parse(JSON.parse(json));
-}
-
 function ask(runtime: Runtime, agent: PromptAgent, userMessage: string) {
   return completeText({
     root: runtime.root,
@@ -68,36 +74,62 @@ async function askCoach(runtime: Runtime, agent: PromptAgent, baseContext: strin
   return ask(runtime, agent, `${baseContext}${revision}`);
 }
 
-async function askReviewer(runtime: Runtime, agent: PromptAgent, baseContext: string, plan: string): Promise<Review> {
-  const prompt = `${baseContext}\n\nПлан для проверки:\n${plan}`.trim();
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const retry = attempt === 1 ? "" : "\n\nПредыдущий ответ был невалидным JSON. Верни только JSON по схеме.";
-    const raw = await ask(runtime, agent, `${prompt}${retry}`);
-    try {
-      return parseReview(raw);
-    } catch {
-      if (attempt === 2) throw new Error(`Reviewer вернул невалидный JSON после ретрая:\n${raw}`);
-      console.log("Reviewer вернул невалидный JSON, повторяю ревью один раз.");
-    }
-  }
-  throw new Error("Reviewer не вернул результат.");
+async function askReviewer(
+  runtime: Runtime,
+  agent: PromptAgent,
+  baseContext: string,
+  plan: string,
+  round: number,
+  maxRounds: number,
+  previousIssues: string[],
+): Promise<Review> {
+  const previous =
+    previousIssues.length > 0
+      ? `\n\nЗамечания прошлого раунда — проверь, закрыты ли они:\n${previousIssues.map((issue) => `- ${issue}`).join("\n")}`
+      : "";
+  const prompt =
+    `${baseContext}\n\nРаунд ревью: ${round} из ${maxRounds}.${previous}\n\nПлан для проверки:\n${plan}`.trim();
+  const raw = await ask(runtime, agent, prompt);
+  const parsed = await validateReview(raw, () =>
+    ask(runtime, agent, `${prompt}\n\nПредыдущий ответ был невалидным JSON. Верни только JSON по схеме.`),
+  );
+  return normalizeReview(parsed);
+}
+
+function toResult(startedAt: number, plan: string, review: Review, rounds: RoundState[]): RunHealthAgentResult {
+  const { finalScore, improved } = summarizeScore(rounds);
+  return {
+    plan,
+    review,
+    rounds,
+    finalScore,
+    improved,
+    promptVersions: { coach: ACTIVE_PROMPTS.coach, reviewer: ACTIVE_PROMPTS.reviewer },
+    durationMs: Date.now() - startedAt,
+  };
 }
 
 export async function runHealthAgent(task: string, options: RunHealthAgentOptions = {}): Promise<RunHealthAgentResult> {
+  const startedAt = Date.now();
   const root = options.root ?? process.cwd();
+  const maxRounds = options.maxRounds ?? DEFAULT_MAX_ROUNDS;
   loadEnv(root);
+  const roundLog = createRoundLog();
   const taskReview = reviewTaskSafety(task);
   if (taskReview) {
-    options.onRound?.(1, taskReview);
-    return { plan: "", review: taskReview, rounds: 1 };
+    const recorded = roundLog.record("", taskReview);
+    options.onRound?.(recorded.round, taskReview);
+    return toResult(startedAt, "", taskReview, roundLog.snapshot());
   }
 
   const apiKey = process.env.CURSOR_API_KEY;
   if (!apiKey) throw new Error("Добавь CURSOR_API_KEY в .env");
 
-  // Контекст только из локальных markdown-файлов.
-  const [profile, log] = await Promise.all([
-    readFile(join(root, "data/profile.md"), "utf8"), readFile(join(root, "data/log.md"), "utf8"),
+  const [profile, log, coachPrompt, reviewerPrompt] = await Promise.all([
+    readFile(join(root, "data/profile.md"), "utf8"),
+    readFile(join(root, "data/log.md"), "utf8"),
+    loadPrompt(root, "healthCoach", ACTIVE_PROMPTS.coach),
+    loadPrompt(root, "safetyReviewer", ACTIVE_PROMPTS.reviewer),
   ]);
   const runtime: Runtime = {
     root,
@@ -105,29 +137,29 @@ export async function runHealthAgent(task: string, options: RunHealthAgentOption
     model: process.env.CURSOR_MODEL ?? "composer-2.5",
   };
   const baseContext = buildContext(task, profile, log);
-  const coach = createHealthCoachAgent();
-  const reviewer = createSafetyReviewerAgent();
+  const coach = createHealthCoachAgent(coachPrompt);
+  const reviewer = createSafetyReviewerAgent(reviewerPrompt);
   let plan = "";
   let issues: string[] = [];
   let lastReview: Review | null = null;
 
-  // Коуч и ревьюер общаются через явные раунды оркестратора.
-  for (let round = 1; round <= MAX_ROUNDS; round += 1) {
+  for (let round = 1; round <= maxRounds; round += 1) {
     plan = await askCoach(runtime, coach, baseContext, plan, issues);
-    const review = await askReviewer(runtime, reviewer, baseContext, plan);
+    const review = await askReviewer(runtime, reviewer, baseContext, plan, round, maxRounds, issues);
     lastReview = review;
+    roundLog.record(plan, review);
     options.onRound?.(round, review);
 
     if (review.verdict === "needs_human_professional") {
-      return { plan: "", review, rounds: round };
+      return toResult(startedAt, "", review, roundLog.snapshot());
     }
     if (review.verdict === "approve") {
       await writeFile(join(root, "data/output.md"), `${plan}\n`, "utf8");
-      return { plan, review, rounds: round };
+      return toResult(startedAt, plan, review, roundLog.snapshot());
     }
     issues = review.issues;
   }
 
   if (!lastReview) throw new Error("Reviewer не вернул результат.");
-  return { plan, review: lastReview, rounds: MAX_ROUNDS };
+  return toResult(startedAt, plan, lastReview, roundLog.snapshot());
 }

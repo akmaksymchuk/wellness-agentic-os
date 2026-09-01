@@ -26,21 +26,36 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
+  RoundsHistory,
   RoundsIndicator,
+  RunMeta,
   ScoreMeter,
   VerdictBadge,
   verdictConfig,
   type ReviewVerdict,
 } from "@/components/health/review-widgets";
 
+type ReviewPayload = {
+  verdict: ReviewVerdict;
+  score: number;
+  issues: string[];
+};
+
 type AgentResult = {
   plan: string;
-  review: {
-    verdict: ReviewVerdict;
-    score: number;
-    issues: string[];
+  review: ReviewPayload;
+  rounds: Array<{
+    round: number;
+    plan: string;
+    review: ReviewPayload;
+  }>;
+  finalScore: number;
+  improved: boolean;
+  promptVersions: {
+    coach: string;
+    reviewer: string;
   };
-  rounds: number;
+  durationMs: number;
 };
 
 type Status = "idle" | "running" | "result";
@@ -222,7 +237,14 @@ export default function Page() {
                     tone={verdictConfig[result.review.verdict].meter}
                   />
                   <Separator />
-                  <RoundsIndicator rounds={result.rounds} />
+                  <RoundsIndicator rounds={result.rounds.length} />
+                  <Separator />
+                  <RoundsHistory rounds={result.rounds} />
+                  <Separator />
+                  <RunMeta
+                    durationMs={result.durationMs}
+                    promptVersions={result.promptVersions}
+                  />
                   <Separator />
                   <div className="space-y-2">
                     <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
