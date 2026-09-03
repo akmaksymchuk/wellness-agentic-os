@@ -8,6 +8,7 @@ import { completeText } from "./completeText";
 import { ACTIVE_PROMPTS, loadPrompt, type PromptVersions } from "./promptVersions";
 import { createRoundLog, type RoundState } from "./rounds";
 import { summarizeScore } from "./score";
+import { traceRun } from "./traceRun";
 import { ReviewSchema, normalizeReview, validateReview, type Review } from "./validateReview";
 
 const DEFAULT_MAX_ROUNDS = 3;
@@ -20,6 +21,7 @@ export type RunHealthAgentResult = {
   resultKind: RunResultKind;
   plan: string;
   review: Review;
+  model: string;
   rounds: RoundState[];
   finalScore: number;
   improved: boolean;
@@ -122,6 +124,7 @@ async function askReviewer(
 
 function toResult(
   startedAt: number,
+  model: string,
   plan: string,
   review: Review,
   rounds: RoundState[],
@@ -133,6 +136,7 @@ function toResult(
     resultKind,
     plan,
     review,
+    model,
     rounds,
     finalScore,
     improved,
@@ -143,16 +147,27 @@ function toResult(
 }
 
 export async function runHealthAgent(task: string, options: RunHealthAgentOptions = {}): Promise<RunHealthAgentResult> {
-  const startedAt = Date.now();
   const root = options.root ?? process.cwd();
+  const result = await runHealthAgentCore(task, options, root);
+  await traceRun({ root, task, result });
+  return result;
+}
+
+async function runHealthAgentCore(
+  task: string,
+  options: RunHealthAgentOptions,
+  root: string,
+): Promise<RunHealthAgentResult> {
+  const startedAt = Date.now();
   const maxRounds = options.maxRounds ?? DEFAULT_MAX_ROUNDS;
   loadEnv(root);
+  const model = process.env.CURSOR_MODEL ?? "composer-2.5";
   const roundLog = createRoundLog();
   const taskReview = reviewTaskSafety(task);
   if (taskReview) {
     const recorded = roundLog.record("", taskReview);
     options.onRound?.(recorded.round, taskReview);
-    return toResult(startedAt, "", taskReview, roundLog.snapshot(), []);
+    return toResult(startedAt, model, "", taskReview, roundLog.snapshot(), []);
   }
 
   const apiKey = process.env.CURSOR_API_KEY;
@@ -162,11 +177,7 @@ export async function runHealthAgent(task: string, options: RunHealthAgentOption
     loadPrompt(root, "healthCoach", ACTIVE_PROMPTS.coach),
     loadPrompt(root, "safetyReviewer", ACTIVE_PROMPTS.reviewer),
   ]);
-  const runtime: Runtime = {
-    root,
-    apiKey,
-    model: process.env.CURSOR_MODEL ?? "composer-2.5",
-  };
+  const runtime: Runtime = { root, apiKey, model };
   const toolCalls: ToolCallRecord[] = [];
   const coachTools = createHealthCoachTools(root, (call) => {
     toolCalls.push(call);
@@ -181,7 +192,7 @@ export async function runHealthAgent(task: string, options: RunHealthAgentOption
     plan = await askCoach(runtime, coach, task, plan, issues, coachTools);
 
     if (toolCalls.some((call) => call.name === "generateShoppingList")) {
-      return toResult(startedAt, plan, SHOPPING_LIST_REVIEW, roundLog.snapshot(), toolCalls, "shopping_list");
+      return toResult(startedAt, model, plan, SHOPPING_LIST_REVIEW, roundLog.snapshot(), toolCalls, "shopping_list");
     }
 
     const review = await askReviewer(runtime, reviewer, plan, round, maxRounds, issues);
@@ -190,18 +201,18 @@ export async function runHealthAgent(task: string, options: RunHealthAgentOption
     options.onRound?.(round, review);
 
     if (review.verdict === "needs_human_professional") {
-      return toResult(startedAt, "", review, roundLog.snapshot(), toolCalls);
+      return toResult(startedAt, model, "", review, roundLog.snapshot(), toolCalls);
     }
     if (review.verdict === "approve") {
       // Harness owns savePlan: persistence only after reviewer approve, so a draft
       // cannot be saved because the model asked for it in the prompt.
       await savePlan(plan, root);
       toolCalls.push({ name: "savePlan" });
-      return toResult(startedAt, plan, review, roundLog.snapshot(), toolCalls);
+      return toResult(startedAt, model, plan, review, roundLog.snapshot(), toolCalls);
     }
     issues = review.issues;
   }
 
   if (!lastReview) throw new Error("Reviewer не вернул результат.");
-  return toResult(startedAt, plan, lastReview, roundLog.snapshot(), toolCalls);
+  return toResult(startedAt, model, plan, lastReview, roundLog.snapshot(), toolCalls);
 }

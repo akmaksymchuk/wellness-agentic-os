@@ -1,0 +1,38 @@
+{
+  "runId": "run-example",
+  "task": "Составь мягкий wellness-план на завтра: питание, активность и восстановление.",
+  "promptVersions": {
+    "coach": "v3",
+    "reviewer": "v2"
+  },
+  "model": "composer-2.5",
+  "rounds": [
+    {
+      "round": 1,
+      "planExcerpt": "## План на завтра\n\n- Завтрак: овсянка с йогуртом и ягодами, стакан воды.\n- Активность: 20 минут спокойной ходьбы после обеда.\n- Восстановление: 10 минут растяжки вечером и сон до 23:30.\n- Отслеживание: энергия, голод и настроение по шкале 1-10.",
+      "review": {
+        "verdict": "approve",
+        "score": 10,
+        "issues": []
+      }
+    }
+  ],
+  "toolCalls": [
+    {
+      "name": "getProfile"
+    },
+    {
+      "name": "getRecentLog",
+      "args": {
+        "days": 7
+      }
+    },
+    {
+      "name": "savePlan"
+    }
+  ],
+  "finalScore": 10,
+  "verdict": "approve",
+  "durationMs": 18420,
+  "createdAt": "2026-07-09T09:00:00.000Z"
+}
