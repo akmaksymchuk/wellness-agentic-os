@@ -30,9 +30,11 @@ import {
   RoundsIndicator,
   RunMeta,
   ScoreMeter,
+  ToolCallsList,
   VerdictBadge,
   verdictConfig,
   type ReviewVerdict,
+  type ToolCallRecord,
 } from "@/components/health/review-widgets";
 
 type ReviewPayload = {
@@ -42,6 +44,7 @@ type ReviewPayload = {
 };
 
 type AgentResult = {
+  resultKind?: "plan" | "shopping_list";
   plan: string;
   review: ReviewPayload;
   rounds: Array<{
@@ -55,6 +58,7 @@ type AgentResult = {
     coach: string;
     reviewer: string;
   };
+  toolCalls: ToolCallRecord[];
   durationMs: number;
 };
 
@@ -232,14 +236,20 @@ export default function Page() {
             <CardContent>
               {result ? (
                 <div className="space-y-5">
-                  <ScoreMeter
-                    score={result.review.score}
-                    tone={verdictConfig[result.review.verdict].meter}
-                  />
-                  <Separator />
-                  <RoundsIndicator rounds={result.rounds.length} />
-                  <Separator />
-                  <RoundsHistory rounds={result.rounds} />
+                  {result.resultKind === "shopping_list" ? null : (
+                    <>
+                      <ScoreMeter
+                        score={result.review.score}
+                        tone={verdictConfig[result.review.verdict].meter}
+                      />
+                      <Separator />
+                      <RoundsIndicator rounds={result.rounds.length} />
+                      <Separator />
+                      <RoundsHistory rounds={result.rounds} />
+                      <Separator />
+                    </>
+                  )}
+                  <ToolCallsList toolCalls={result.toolCalls ?? []} />
                   <Separator />
                   <RunMeta
                     durationMs={result.durationMs}
@@ -327,9 +337,13 @@ export default function Page() {
             ) : (
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Финальный план</CardTitle>
+                  <CardTitle className="text-base">
+                    {result.resultKind === "shopping_list" ? "Список покупок" : "Финальный план"}
+                  </CardTitle>
                   <CardDescription>
-                    Одобрен ревьюером безопасности
+                    {result.resultKind === "shopping_list"
+                      ? "Составлен инструментом generateShoppingList"
+                      : "Одобрен ревьюером безопасности"}
                   </CardDescription>
                   <CardAction>
                     <Button

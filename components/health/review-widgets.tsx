@@ -1,8 +1,11 @@
 import type { LucideIcon } from "lucide-react";
-import { BookOpen, ChevronDown, CircleCheckBig, PencilLine, ShieldAlert, Timer } from "lucide-react";
+import { BookOpen, ChevronDown, CircleCheckBig, ListChecks, PencilLine, ShieldAlert, Timer } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { formatToolCallLabel, type ToolCallRecord } from "@/src/skills/cursorTool";
+
+export type { ToolCallRecord };
 
 export type ReviewVerdict = "approve" | "revise" | "needs_human_professional";
 
@@ -212,5 +215,31 @@ export function RunMeta({
         </dd>
       </div>
     </dl>
+  );
+}
+
+export function ToolCallsList({ toolCalls }: { toolCalls: ToolCallRecord[] }) {
+  return (
+    <div className="space-y-3">
+      <p className="text-muted-foreground flex items-center gap-2 text-sm font-medium">
+        <ListChecks className="size-4" aria-hidden="true" />
+        Что сделал агент
+      </p>
+      {toolCalls.length ? (
+        <ol className="flex flex-wrap gap-2">
+          {toolCalls.map((call, index) => (
+            <li
+              key={`${call.name}-${index}`}
+              className="bg-muted/45 text-foreground inline-flex min-h-8 items-center gap-2 rounded-md px-2.5 py-1.5 text-xs font-medium"
+            >
+              <span className="text-muted-foreground tabular-nums">{index + 1}</span>
+              {formatToolCallLabel(call)}
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="text-muted-foreground text-sm">Инструменты не вызывались</p>
+      )}
+    </div>
   );
 }
