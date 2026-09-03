@@ -21,17 +21,23 @@
 - `src/skills/` — function tools коуча (`local.customTools` в `@cursor/sdk`), не OpenAI Agents SDK.
 - `src/harness/completeText.ts` — адаптер `@cursor/sdk`: ревьюер `tools: []`, коуч `tools: ["mcp"]` + `customTools`.
 - `src/harness/runHealthAgent.ts` — оркестрация цикла coach/reviewer, safety pre-check, savePlan после approve.
+- `src/harness/traceRun.ts` — пишет локальный JSON-трейс в `runs/run-<timestamp>.json` после каждого запуска.
+- `scripts/replay.ts` и `scripts/eval.ts` — replay одного трейса и последовательный прогон мини-evals.
+- `evals/cases/*.json` — пять кейсов (включая safety gate `bad-medical-request`).
+- `runs/run-example.json` — пример трейса в репозитории; остальные файлы `runs/` в git не попадают.
 - `data/profile.md`, `data/log.md`, `data/output.md`, `data/recipes.md` — локальный профиль, дневник, план и рецепты.
-- Тестовой директории сейчас нет; статические ассеты тоже не используются.
+- Статические ассеты не используются.
 
 ## Команды разработки, сборки и запуска
 
 - `npm run dev` — запускает локальный Next.js dev server на `http://localhost:3000`.
 - `npm run build` — проверяет TypeScript и собирает production bundle.
 - `npm run start` — запускает production server после успешной сборки.
+- `npm run replay -- runs/run-XXX.json` — прогоняет задачу из трейса через текущий harness и печатает old vs new.
+- `npm run eval` — последовательно прогоняет `evals/cases/*.json` и печатает таблицу PASS/FAIL.
 - `npm install` — восстанавливает зависимости из `package-lock.json`.
 
-Отдельного CLI entrypoint нет: работаем только через интерфейс и API route.
+Основной сценарий — UI и API route. Replay и eval — локальные CLI на `tsx`, без сборки и без внешних трейсеров.
 
 ## Стиль кода и соглашения
 
@@ -53,7 +59,7 @@ UI строится на **Tailwind CSS v4 + shadcn/ui** (стиль new-york). 
 
 ## Тестирование
 
-Автоматические тесты пока не настроены. Перед сдачей изменений минимум запускайте `npm run build` (он же прогоняет TypeScript). Для изменений UI вручную проверьте `npm run dev`: idle, running (skeleton + спиннер на кнопке), result (score-meter, раунды, замечания, «Копировать»), warning при `needs_human_professional`, а также error (пустая задача / отсутствие ключа). Для изменений harness проверьте, что одобренный план записывается в `data/output.md`.
+Автоматические unit-тесты не настроены. Перед сдачей изменений минимум запускайте `npm run build` (он же прогоняет TypeScript). Для изменений UI вручную проверьте `npm run dev`: idle, running (skeleton + спиннер на кнопке), result (score-meter, раунды, замечания, «Копировать»), warning при `needs_human_professional`, а также error (пустая задача / отсутствие ключа). Для изменений harness проверьте, что одобренный план записывается в `data/output.md`, а запуск пишет JSON в `runs/`. После правок промпта или модели используйте `npm run replay` и `npm run eval`.
 При написании кода агентом не пиши тесты и не используй TDD.
 
 ## Коммиты и pull request

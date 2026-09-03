@@ -26,6 +26,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
+  IssuesHistory,
   RoundsHistory,
   RoundsIndicator,
   RunMeta,
@@ -256,11 +257,13 @@ export default function Page() {
                     promptVersions={result.promptVersions}
                   />
                   <Separator />
-                  <div className="space-y-2">
-                    <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                      Замечания
-                    </p>
-                    {result.review.issues.length ? (
+                  {result.rounds.length ? (
+                    <IssuesHistory rounds={result.rounds} />
+                  ) : result.review.issues.length ? (
+                    <div className="space-y-2">
+                      <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                        Замечания
+                      </p>
                       <ul className="space-y-2">
                         {result.review.issues.map((issue) => (
                           <li
@@ -275,16 +278,16 @@ export default function Page() {
                           </li>
                         ))}
                       </ul>
-                    ) : (
-                      <p className="text-muted-foreground flex items-center gap-2 text-sm">
-                        <CircleCheckBig
-                          className="size-4 text-emerald-600"
-                          aria-hidden="true"
-                        />
-                        Замечаний нет
-                      </p>
-                    )}
-                  </div>
+                    </div>
+                  ) : (
+                    <p className="text-muted-foreground flex items-center gap-2 text-sm">
+                      <CircleCheckBig
+                        className="size-4 text-emerald-600"
+                        aria-hidden="true"
+                      />
+                      Замечаний нет
+                    </p>
+                  )}
                 </div>
               ) : isRunning ? (
                 <div className="space-y-4" aria-hidden="true">

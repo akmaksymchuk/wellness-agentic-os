@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "replay": "tsx scripts/replay.ts",
+    "eval": "tsx scripts/eval.ts",
     "start": "next start"
   },
   "dependencies": {
@@ -31,6 +33,7 @@
     "@types/react-dom": "^19.2.3",
     "postcss": "^8.5.16",
     "tailwindcss": "^4.3.2",
+    "tsx": "^4.23.13",
     "typescript": "^6.0.3"
   }
 }

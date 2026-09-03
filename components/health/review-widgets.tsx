@@ -149,6 +149,66 @@ export function RoundsIndicator({
   );
 }
 
+export function IssuesHistory({
+  rounds,
+}: {
+  rounds: Array<{
+    round: number;
+    review: { verdict: ReviewVerdict; issues: string[] };
+  }>;
+}) {
+  if (!rounds.length) return null;
+
+  const issueCount = rounds.reduce((count, item) => count + item.review.issues.length, 0);
+
+  return (
+    <details className="group" open>
+      <summary className="text-muted-foreground hover:text-foreground focus-visible:ring-ring flex cursor-pointer list-none items-center justify-between gap-2 rounded-sm text-xs font-medium tracking-wide uppercase select-none focus-visible:ring-2 focus-visible:outline-none [&::-webkit-details-marker]:hidden">
+        <span className="flex items-center gap-2">
+          <ChevronDown
+            className="size-3.5 transition-transform duration-200 group-open:rotate-180 motion-reduce:transition-none"
+            aria-hidden="true"
+          />
+          Замечания
+        </span>
+        <span className="text-foreground font-semibold tracking-normal tabular-nums normal-case">
+          {issueCount}
+        </span>
+      </summary>
+      <ol className="mt-3 space-y-3" aria-label="История замечаний по раундам">
+        {rounds.map((item) => (
+          <li key={item.round} className="space-y-1.5">
+            <p className="text-foreground text-sm leading-relaxed">
+              Раунд {item.round} — {verdictConfig[item.review.verdict].label}
+            </p>
+            {item.review.issues.length ? (
+              <ul className="space-y-1.5">
+                {item.review.issues.map((issue) => (
+                  <li
+                    key={issue}
+                    className="text-foreground flex gap-2 text-sm leading-relaxed"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="bg-amber-500 mt-2 size-1.5 shrink-0 rounded-full"
+                    />
+                    {issue}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-muted-foreground flex items-center gap-2 text-sm">
+                <CircleCheckBig className="size-4 text-emerald-600" aria-hidden="true" />
+                Замечаний нет
+              </p>
+            )}
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
 export function RoundsHistory({
   rounds,
 }: {
