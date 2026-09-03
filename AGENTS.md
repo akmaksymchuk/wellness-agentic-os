@@ -17,10 +17,11 @@
 - `components/health/review-widgets.tsx` — презентационные виджеты ревью: `VerdictBadge`, `ScoreMeter`, `RoundsIndicator`, `verdictConfig`.
 - `lib/utils.ts` — хелпер `cn()` (clsx + tailwind-merge) для shadcn.
 - `components.json` — конфиг shadcn CLI (стиль new-york, alias `@/*`).
-- `src/agents/healthCoach.ts` и `src/agents/safetyReviewer.ts` — определения агентов (name + instructions), промпты и схема ревью.
-- `src/harness/completeText.ts` — тонкий адаптер `@cursor/sdk`: one-shot `Agent.prompt`, `tools: []`, изолированный `cwd`.
-- `src/harness/runHealthAgent.ts` — оркестрация цикла coach/reviewer, safety pre-check, чтение/запись markdown.
-- `data/profile.md`, `data/log.md`, `data/output.md` — локальный профиль, дневник и последний одобренный план.
+- `src/agents/healthCoach.ts` и `src/agents/safetyReviewer.ts` — определения агентов (name + instructions).
+- `src/skills/` — function tools коуча (`local.customTools` в `@cursor/sdk`), не OpenAI Agents SDK.
+- `src/harness/completeText.ts` — адаптер `@cursor/sdk`: ревьюер `tools: []`, коуч `tools: ["mcp"]` + `customTools`.
+- `src/harness/runHealthAgent.ts` — оркестрация цикла coach/reviewer, safety pre-check, savePlan после approve.
+- `data/profile.md`, `data/log.md`, `data/output.md`, `data/recipes.md` — локальный профиль, дневник, план и рецепты.
 - Тестовой директории сейчас нет; статические ассеты тоже не используются.
 
 ## Команды разработки, сборки и запуска
@@ -63,7 +64,7 @@ UI строится на **Tailwind CSS v4 + shadcn/ui** (стиль new-york). 
 
 Секреты храните только в `.env`: `CURSOR_API_KEY`, опционально `CURSOR_MODEL` (по умолчанию `composer-2.5`). Ключ: Cursor Dashboard → Integrations. Не коммитьте `.env`.
 
-Не переносите цикл coach/reviewer в чат IDE. Не давайте SDK-агенту корень репозитория и не включайте `local.settingSources: ["all"]`. Runtime вызывает модель с `tools: []` (только текст, как `maxTurns: 1` в курсе). Не добавляйте авторизацию, БД, историю сообщений, streaming, MCP или новые способности агентов без явного требования. Промпты и revision loop меняйте только осознанно: это основная бизнес-логика проекта.
+Не переносите цикл coach/reviewer в чат IDE. Не давайте SDK-агенту корень репозитория и не включайте `local.settingSources: ["all"]`. Ревьюер вызывается с `tools: []`. Коуч получает только `tools: ["mcp"]` и `local.customTools` (без shell/read по репозиторию). Не добавляйте авторизацию, БД, историю сообщений, streaming или внешние MCP без явного требования. Промпты и revision loop меняйте только осознанно: это основная бизнес-логика проекта.
 
 ## Принципы кодовой базы
 

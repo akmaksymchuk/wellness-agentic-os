@@ -17,4 +17,4 @@ npm run dev
 
 Open `http://localhost:3000`, enter one task, and press `Run Agent`.
 
-The agent reads `data/profile.md` and `data/log.md`. Approved plans are saved to `data/output.md`.
+The coach loads `data/profile.md` and `data/log.md` via custom tools when needed. Approved plans are saved to `data/output.md`.
