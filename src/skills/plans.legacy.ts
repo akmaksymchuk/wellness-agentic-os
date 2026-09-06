@@ -1,3 +1,4 @@
+/** Pre-MCP custom tool. Harness now persists via MCP `save_health_plan`. */
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
@@ -18,7 +19,7 @@ export async function savePlan(markdown: string, root = process.cwd()): Promise<
   return { ok: true };
 }
 
-/** Defined for the course shape; not attached to the coach. Harness calls savePlan after approve. */
+/** Defined for the course shape; not attached to the coach. */
 export function createSavePlanTool(root: string) {
   return defineCursorTool({
     description:

@@ -14,9 +14,28 @@ function formatArgValue(value: SDKJsonValue): string {
   return JSON.stringify(value);
 }
 
+export const MCP_TOOL_NAMES = new Set([
+  "read_profile",
+  "read_recent_logs",
+  "append_daily_log",
+  "save_health_plan",
+  "list_recipes",
+]);
+
+export const LOCAL_TOOL_NAMES = new Set(["generateShoppingList", "suggestWorkoutTemplate"]);
+
+export function toolSource(name: string): "MCP" | "local" | null {
+  if (MCP_TOOL_NAMES.has(name)) return "MCP";
+  if (LOCAL_TOOL_NAMES.has(name)) return "local";
+  return null;
+}
+
 export function formatToolCallLabel(call: ToolCallRecord): string {
-  if (call.name === "getRecentLog" && typeof call.args?.days === "number") {
-    return `getRecentLog · ${call.args.days} дн.`;
+  if (
+    (call.name === "read_recent_logs" || call.name === "getRecentLog") &&
+    typeof call.args?.days === "number"
+  ) {
+    return `${call.name} · ${call.args.days} дн.`;
   }
 
   const entries = call.args

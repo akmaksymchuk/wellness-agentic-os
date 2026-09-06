@@ -1,3 +1,4 @@
+/** Pre-MCP custom tool. Coach no longer attaches this — use MCP `read_profile`. */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
