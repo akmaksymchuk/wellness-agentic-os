@@ -16,6 +16,17 @@
         "pattern": "- Local:.+(https?://.+)",
         "uriFormat": "%s"
       }
+    },
+    {
+      "name": "Debug mcp:inspect",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/node_modules/tsx/dist/cli.mjs",
+      "args": ["${workspaceFolder}/scripts/inspectMcp.ts"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "autoAttachChildProcesses": true,
+      "skipFiles": ["<node_internals>/**"]
     }
   ]
 }

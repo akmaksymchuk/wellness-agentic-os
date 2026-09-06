@@ -2,7 +2,7 @@
   "runId": "run-example",
   "task": "Составь мягкий wellness-план на завтра: питание, активность и восстановление.",
   "promptVersions": {
-    "coach": "v3",
+    "coach": "v4",
     "reviewer": "v2"
   },
   "model": "composer-2.5",
@@ -19,16 +19,16 @@
   ],
   "toolCalls": [
     {
-      "name": "getProfile"
+      "name": "read_profile"
     },
     {
-      "name": "getRecentLog",
+      "name": "read_recent_logs",
       "args": {
         "days": 7
       }
     },
     {
-      "name": "savePlan"
+      "name": "save_health_plan"
     }
   ],
   "finalScore": 10,

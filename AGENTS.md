@@ -18,9 +18,11 @@
 - `lib/utils.ts` — хелпер `cn()` (clsx + tailwind-merge) для shadcn.
 - `components.json` — конфиг shadcn CLI (стиль new-york, alias `@/*`).
 - `src/agents/healthCoach.ts` и `src/agents/safetyReviewer.ts` — определения агентов (name + instructions).
-- `src/skills/` — function tools коуча (`local.customTools` в `@cursor/sdk`), не OpenAI Agents SDK.
-- `src/harness/completeText.ts` — адаптер `@cursor/sdk`: ревьюер `tools: []`, коуч `tools: ["mcp"]` + `customTools`.
-- `src/harness/runHealthAgent.ts` — оркестрация цикла coach/reviewer, safety pre-check, savePlan после approve.
+- `src/skills/` — локальные custom tools коуча (`generateShoppingList`, `suggestWorkoutTemplate`). Markdown-данные ушли в MCP; старые wrappers — `*.legacy.ts`.
+- `src/mcp/markdownHealthServer.ts` — свой stdio MCP-сервер над `data/*.md` (`@modelcontextprotocol/sdk`).
+- `src/mcp/stdioClient.ts` — конфиг `mcpServers` для Cursor SDK и короткий MCP-клиент для inspect / `save_health_plan`.
+- `src/harness/completeText.ts` — адаптер `@cursor/sdk`: ревьюер `tools: []`, коуч `tools: ["mcp"]` + `customTools` + inline `mcpServers`.
+- `src/harness/runHealthAgent.ts` — оркестрация цикла coach/reviewer, safety pre-check, `save_health_plan` через MCP после approve.
 - `src/harness/traceRun.ts` — пишет локальный JSON-трейс в `runs/run-<timestamp>.json` после каждого запуска.
 - `scripts/replay.ts` и `scripts/eval.ts` — replay одного трейса и последовательный прогон мини-evals.
 - `evals/cases/*.json` — пять кейсов (включая safety gate `bad-medical-request`).
@@ -35,6 +37,7 @@
 - `npm run start` — запускает production server после успешной сборки.
 - `npm run replay -- runs/run-XXX.json` — прогоняет задачу из трейса через текущий harness и печатает old vs new.
 - `npm run eval` — последовательно прогоняет `evals/cases/*.json` и печатает таблицу PASS/FAIL.
+- `npm run mcp:inspect` — поднимает локальный MCP-сервер, печатает tools/resources и закрывает процесс.
 - `npm install` — восстанавливает зависимости из `package-lock.json`.
 
 Основной сценарий — UI и API route. Replay и eval — локальные CLI на `tsx`, без сборки и без внешних трейсеров.
@@ -70,7 +73,7 @@ UI строится на **Tailwind CSS v4 + shadcn/ui** (стиль new-york). 
 
 Секреты храните только в `.env`: `CURSOR_API_KEY`, опционально `CURSOR_MODEL` (по умолчанию `composer-2.5`). Ключ: Cursor Dashboard → Integrations. Не коммитьте `.env`.
 
-Не переносите цикл coach/reviewer в чат IDE. Не давайте SDK-агенту корень репозитория и не включайте `local.settingSources: ["all"]`. Ревьюер вызывается с `tools: []`. Коуч получает только `tools: ["mcp"]` и `local.customTools` (без shell/read по репозиторию). Не добавляйте авторизацию, БД, историю сообщений, streaming или внешние MCP без явного требования. Промпты и revision loop меняйте только осознанно: это основная бизнес-логика проекта.
+Не переносите цикл coach/reviewer в чат IDE. Не давайте SDK-агенту корень репозитория и не включайте `local.settingSources: ["all"]`. Ревьюер вызывается с `tools: []`. Коуч получает `tools: ["mcp"]`, `local.customTools` (shopping/workouts) и inline stdio `mcpServers.markdown-health` (без shell/read по репозиторию). Данные сервер читает по `HEALTH_DATA_ROOT`. Не добавляйте авторизацию, БД, историю сообщений, streaming или внешние/HTTP MCP без явного требования. Промпты и revision loop меняйте только осознанно: это основная бизнес-логика проекта.
 
 ## Принципы кодовой базы
 

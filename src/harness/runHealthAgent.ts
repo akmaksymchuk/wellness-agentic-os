@@ -1,9 +1,16 @@
-import type { SDKCustomTool } from "@cursor/sdk";
+import type { McpServerConfig, SDKCustomTool } from "@cursor/sdk";
 import { config as loadDotenv } from "dotenv";
 import { join } from "node:path";
 import { createHealthCoachAgent, type PromptAgent } from "../agents/healthCoach";
 import { createSafetyReviewerAgent } from "../agents/safetyReviewer";
-import { createHealthCoachTools, savePlan, type ToolCallRecord } from "../skills";
+import {
+  createMarkdownHealthMcpClient,
+  HEALTH_COACH_MCP_TOOLS,
+  markdownHealthMcpConfig,
+  MARKDOWN_HEALTH_MCP_NAME,
+  type MarkdownHealthMcpClient,
+} from "../mcp/stdioClient";
+import { createLocalHealthCoachTools, type ToolCallRecord } from "../skills";
 import { completeText } from "./completeText";
 import { ACTIVE_PROMPTS, loadPrompt, type PromptVersions } from "./promptVersions";
 import { createRoundLog, type RoundState } from "./rounds";
@@ -40,6 +47,8 @@ type Runtime = {
   root: string;
   apiKey: string;
   model: string;
+  mcpServers?: Record<string, McpServerConfig>;
+  onToolCall?: (call: ToolCallRecord) => void;
 };
 
 function loadEnv(root: string) {
@@ -84,6 +93,8 @@ function ask(
     instructions: agent.instructions,
     userMessage,
     customTools,
+    mcpServers: customTools ? runtime.mcpServers : undefined,
+    onToolCall: customTools ? runtime.onToolCall : undefined,
   });
 }
 
@@ -98,8 +109,7 @@ async function askCoach(
   const revision = issues.length
     ? `\n\nПредыдущий план:\n${previousPlan}\n\nЗамечания Safety Reviewer:\n${issues.map((issue) => `- ${issue}`).join("\n")}\n\nИсправь план с учетом замечаний. Верни только обновленный план.`
     : "";
-  const text = await ask(runtime, agent, `Задача пользователя:\n${task}${revision}`, customTools);
-  return text;
+  return ask(runtime, agent, `Задача пользователя:\n${task}${revision}`, customTools);
 }
 
 async function askReviewer(
@@ -120,6 +130,10 @@ async function askReviewer(
     ask(runtime, agent, `${prompt}\n\nПредыдущий ответ был невалидным JSON. Верни только JSON по схеме.`),
   );
   return normalizeReview(parsed);
+}
+
+async function saveApprovedPlanViaMcp(server: MarkdownHealthMcpClient, markdown: string) {
+  await server.callTool("save_health_plan", { markdown });
 }
 
 function toResult(
@@ -177,42 +191,58 @@ async function runHealthAgentCore(
     loadPrompt(root, "healthCoach", ACTIVE_PROMPTS.coach),
     loadPrompt(root, "safetyReviewer", ACTIVE_PROMPTS.reviewer),
   ]);
-  const runtime: Runtime = { root, apiKey, model };
   const toolCalls: ToolCallRecord[] = [];
-  const coachTools = createHealthCoachTools(root, (call) => {
+  const coachTools = createLocalHealthCoachTools(root, (call) => {
     toolCalls.push(call);
   });
+  const markdownMcp = await createMarkdownHealthMcpClient(root);
+  const runtime: Runtime = {
+    root,
+    apiKey,
+    model,
+    mcpServers: {
+      [MARKDOWN_HEALTH_MCP_NAME]: markdownHealthMcpConfig(root, {
+        allowedTools: HEALTH_COACH_MCP_TOOLS,
+      }),
+    },
+    onToolCall: (call) => {
+      toolCalls.push(call);
+    },
+  };
   const coach = createHealthCoachAgent(coachPrompt);
   const reviewer = createSafetyReviewerAgent(reviewerPrompt);
   let plan = "";
   let issues: string[] = [];
   let lastReview: Review | null = null;
 
-  for (let round = 1; round <= maxRounds; round += 1) {
-    plan = await askCoach(runtime, coach, task, plan, issues, coachTools);
+  try {
+    for (let round = 1; round <= maxRounds; round += 1) {
+      plan = await askCoach(runtime, coach, task, plan, issues, coachTools);
 
-    if (toolCalls.some((call) => call.name === "generateShoppingList")) {
-      return toResult(startedAt, model, plan, SHOPPING_LIST_REVIEW, roundLog.snapshot(), toolCalls, "shopping_list");
+      if (toolCalls.some((call) => call.name === "generateShoppingList")) {
+        return toResult(startedAt, model, plan, SHOPPING_LIST_REVIEW, roundLog.snapshot(), toolCalls, "shopping_list");
+      }
+
+      const review = await askReviewer(runtime, reviewer, plan, round, maxRounds, issues);
+      lastReview = review;
+      roundLog.record(plan, review);
+      options.onRound?.(round, review);
+
+      if (review.verdict === "needs_human_professional") {
+        return toResult(startedAt, model, "", review, roundLog.snapshot(), toolCalls);
+      }
+      if (review.verdict === "approve") {
+        // Harness owns persistence: an unreviewed draft cannot save itself, even though storage is MCP.
+        await saveApprovedPlanViaMcp(markdownMcp, plan);
+        toolCalls.push({ name: "save_health_plan" });
+        return toResult(startedAt, model, plan, review, roundLog.snapshot(), toolCalls);
+      }
+      issues = review.issues;
     }
 
-    const review = await askReviewer(runtime, reviewer, plan, round, maxRounds, issues);
-    lastReview = review;
-    roundLog.record(plan, review);
-    options.onRound?.(round, review);
-
-    if (review.verdict === "needs_human_professional") {
-      return toResult(startedAt, model, "", review, roundLog.snapshot(), toolCalls);
-    }
-    if (review.verdict === "approve") {
-      // Harness owns savePlan: persistence only after reviewer approve, so a draft
-      // cannot be saved because the model asked for it in the prompt.
-      await savePlan(plan, root);
-      toolCalls.push({ name: "savePlan" });
-      return toResult(startedAt, model, plan, review, roundLog.snapshot(), toolCalls);
-    }
-    issues = review.issues;
+    if (!lastReview) throw new Error("Reviewer не вернул результат.");
+    return toResult(startedAt, model, plan, lastReview, roundLog.snapshot(), toolCalls);
+  } finally {
+    await markdownMcp.close();
   }
-
-  if (!lastReview) throw new Error("Reviewer не вернул результат.");
-  return toResult(startedAt, model, plan, lastReview, roundLog.snapshot(), toolCalls);
 }

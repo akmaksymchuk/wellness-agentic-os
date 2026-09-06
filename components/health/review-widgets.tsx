@@ -3,7 +3,7 @@ import { BookOpen, ChevronDown, CircleCheckBig, ListChecks, PencilLine, ShieldAl
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { formatToolCallLabel, type ToolCallRecord } from "@/src/skills/cursorTool";
+import { formatToolCallLabel, toolSource, type ToolCallRecord } from "@/src/skills/cursorTool";
 
 export type { ToolCallRecord };
 
@@ -287,15 +287,33 @@ export function ToolCallsList({ toolCalls }: { toolCalls: ToolCallRecord[] }) {
       </p>
       {toolCalls.length ? (
         <ol className="flex flex-wrap gap-2">
-          {toolCalls.map((call, index) => (
+          {toolCalls.map((call, index) => {
+            const source = toolSource(call.name);
+            return (
             <li
               key={`${call.name}-${index}`}
               className="bg-muted/45 text-foreground inline-flex min-h-8 items-center gap-2 rounded-md px-2.5 py-1.5 text-xs font-medium"
             >
               <span className="text-muted-foreground tabular-nums">{index + 1}</span>
-              {formatToolCallLabel(call)}
+              <span className="flex flex-wrap items-center gap-1.5">
+                <span>{formatToolCallLabel(call)}</span>
+                {source ? (
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "h-5 rounded-sm px-1.5 text-[10px] font-semibold tracking-wide uppercase",
+                      source === "MCP"
+                        ? "border-cyan-200 bg-cyan-50 text-cyan-700"
+                        : "border-emerald-200 bg-emerald-50 text-emerald-700",
+                    )}
+                  >
+                    {source}
+                  </Badge>
+                ) : null}
+              </span>
             </li>
-          ))}
+            );
+          })}
         </ol>
       ) : (
         <p className="text-muted-foreground text-sm">Инструменты не вызывались</p>
