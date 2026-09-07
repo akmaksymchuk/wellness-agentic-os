@@ -3,13 +3,7 @@ import { config as loadDotenv } from "dotenv";
 import { join } from "node:path";
 import { createHealthCoachAgent, type PromptAgent } from "../agents/healthCoach";
 import { createSafetyReviewerAgent } from "../agents/safetyReviewer";
-import {
-  createMarkdownHealthMcpClient,
-  HEALTH_COACH_MCP_TOOLS,
-  markdownHealthMcpConfig,
-  MARKDOWN_HEALTH_MCP_NAME,
-  type MarkdownHealthMcpClient,
-} from "../mcp/stdioClient";
+import { createMarkdownHealthMcpClient, cursorMcpServers, type MarkdownHealthMcpClient } from "../mcp/stdioClient";
 import { createLocalHealthCoachTools, type ToolCallRecord } from "../skills";
 import { completeText } from "./completeText";
 import { ACTIVE_PROMPTS, loadPrompt, type PromptVersions } from "./promptVersions";
@@ -200,11 +194,7 @@ async function runHealthAgentCore(
     root,
     apiKey,
     model,
-    mcpServers: {
-      [MARKDOWN_HEALTH_MCP_NAME]: markdownHealthMcpConfig(root, {
-        allowedTools: HEALTH_COACH_MCP_TOOLS,
-      }),
-    },
+    mcpServers: cursorMcpServers(root),
     onToolCall: (call) => {
       toolCalls.push(call);
     },
@@ -234,7 +224,7 @@ async function runHealthAgentCore(
       if (review.verdict === "approve") {
         // Harness owns persistence: an unreviewed draft cannot save itself, even though storage is MCP.
         await saveApprovedPlanViaMcp(markdownMcp, plan);
-        toolCalls.push({ name: "save_health_plan" });
+        toolCalls.push({ name: "save_health_plan", source: "markdown-health" });
         return toResult(startedAt, model, plan, review, roundLog.snapshot(), toolCalls);
       }
       issues = review.issues;

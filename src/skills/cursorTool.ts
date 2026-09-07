@@ -1,8 +1,13 @@
 import type { SDKCustomTool, SDKJsonValue } from "@cursor/sdk";
 import type { z } from "zod";
 
+import type { HealthMcpServerName } from "../mcp/servers.config";
+
+export type ToolCallSource = HealthMcpServerName | "local";
+
 export type ToolCallRecord = {
   name: string;
+  source?: ToolCallSource;
   args?: Record<string, SDKJsonValue>;
 };
 
@@ -14,19 +19,11 @@ function formatArgValue(value: SDKJsonValue): string {
   return JSON.stringify(value);
 }
 
-export const MCP_TOOL_NAMES = new Set([
-  "read_profile",
-  "read_recent_logs",
-  "append_daily_log",
-  "save_health_plan",
-  "list_recipes",
-]);
-
 export const LOCAL_TOOL_NAMES = new Set(["generateShoppingList", "suggestWorkoutTemplate"]);
 
-export function toolSource(name: string): "MCP" | "local" | null {
-  if (MCP_TOOL_NAMES.has(name)) return "MCP";
-  if (LOCAL_TOOL_NAMES.has(name)) return "local";
+export function toolSource(call: ToolCallRecord): ToolCallSource | null {
+  if (call.source) return call.source;
+  if (LOCAL_TOOL_NAMES.has(call.name)) return "local";
   return null;
 }
 
@@ -74,7 +71,7 @@ export function traceTools(
       {
         ...tool,
         async execute(args, context) {
-          onCall({ name, args });
+          onCall({ name, source: "local", args });
           return tool.execute(args, context);
         },
       } satisfies SDKCustomTool,

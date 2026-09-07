@@ -20,10 +20,11 @@ function formatToolCalls(value: unknown): string {
       if (!toolCall || typeof toolCall !== "object") return "unknown";
       const item = toolCall as Record<string, unknown>;
       const name = typeof item.name === "string" ? item.name : "unknown";
+      const source = typeof item.source === "string" ? `[${item.source}] ` : "";
       if (item.args && typeof item.args === "object") {
-        return `${name}(${JSON.stringify(item.args)})`;
+        return `${source}${name}(${JSON.stringify(item.args)})`;
       }
-      return typeof item.details === "string" ? `${name}(${item.details})` : name;
+      return typeof item.details === "string" ? `${source}${name}(${item.details})` : `${source}${name}`;
     })
     .join(", ");
 }

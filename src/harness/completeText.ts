@@ -8,8 +8,8 @@ import {
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
-import { MARKDOWN_HEALTH_MCP_NAME } from "../mcp/stdioClient";
-import type { ToolCallRecord } from "../skills/cursorTool";
+import type { HealthMcpServerName } from "../mcp/servers.config";
+import type { ToolCallRecord, ToolCallSource } from "../skills/cursorTool";
 
 const TEXT_ONLY = `
 Не используй инструменты. Не читай и не меняй файлы. Не запускай команды.
@@ -17,11 +17,18 @@ const TEXT_ONLY = `
 `.trim();
 
 const COACH_TOOLS = `
-Можно вызывать только переданные custom tools и tools локального MCP-сервера markdown-health.
+Можно вызывать только переданные custom tools и tools подключённых MCP-серверов из конфига.
 Не читай и не меняй файлы репозитория напрямую и не запускай команды в терминале.
-Профиль, дневник и рецепты бери через MCP. Список покупок и шаблон тренировки — через custom tools.
+Профиль, дневник и рецепты бери через markdown-health. Список покупок и шаблон тренировки — через custom tools.
 Не вызывай save_health_plan: план сохраняет harness после одобрения Safety Reviewer.
 `.trim();
+
+const KNOWN_MCP_SOURCES = new Set<HealthMcpServerName>([
+  "markdown-health",
+  "filesystem",
+  "weather",
+  "notion",
+]);
 
 const SKIP_MCP_TOOL_NAMES = new Set(["GetMcpTools", "GetMcpResources", "ListMcpResources"]);
 
@@ -42,7 +49,14 @@ function asArgs(value: unknown): Record<string, SDKJsonValue> | undefined {
   return value as Record<string, SDKJsonValue>;
 }
 
-function noteMarkdownMcpTool(toolCall: unknown, onToolCall?: (call: ToolCallRecord) => void) {
+function sourceFromProvider(providerIdentifier: string | undefined): ToolCallSource {
+  if (providerIdentifier && KNOWN_MCP_SOURCES.has(providerIdentifier as HealthMcpServerName)) {
+    return providerIdentifier as HealthMcpServerName;
+  }
+  return "markdown-health";
+}
+
+function noteMcpTool(toolCall: unknown, onToolCall?: (call: ToolCallRecord) => void) {
   if (!toolCall || typeof toolCall !== "object") return;
   const call = toolCall as {
     type?: string;
@@ -50,16 +64,14 @@ function noteMarkdownMcpTool(toolCall: unknown, onToolCall?: (call: ToolCallReco
   };
   if (call.type !== "mcp") return;
   if (call.args?.providerIdentifier === "custom-user-tools") return;
-  if (
-    call.args?.providerIdentifier &&
-    call.args.providerIdentifier !== MARKDOWN_HEALTH_MCP_NAME
-  ) {
-    return;
-  }
   const name = call.args?.toolName;
   if (!name || SKIP_MCP_TOOL_NAMES.has(name)) return;
   const args = asArgs(call.args?.args);
-  onToolCall?.({ name, ...(args ? { args } : {}) });
+  onToolCall?.({
+    name,
+    source: sourceFromProvider(call.args?.providerIdentifier),
+    ...(args ? { args } : {}),
+  });
 }
 
 export async function completeText(input: CompleteTextInput): Promise<string> {
@@ -116,7 +128,7 @@ export async function completeText(input: CompleteTextInput): Promise<string> {
       const run = await agent.send(prompt, {
         onDelta: ({ update }) => {
           if (update.type !== "tool-call-completed") return;
-          noteMarkdownMcpTool(update.toolCall, (call) => {
+          noteMcpTool(update.toolCall, (call) => {
             recordedFromDelta += 1;
             input.onToolCall?.(call);
           });
@@ -132,7 +144,7 @@ export async function completeText(input: CompleteTextInput): Promise<string> {
         for (const turn of turns) {
           if (turn.type !== "agentConversationTurn") continue;
           for (const step of turn.turn.steps) {
-            if (step.type === "toolCall") noteMarkdownMcpTool(step.message, input.onToolCall);
+            if (step.type === "toolCall") noteMcpTool(step.message, input.onToolCall);
           }
         }
       }
