@@ -3,7 +3,12 @@ import { BookOpen, ChevronDown, CircleCheckBig, ListChecks, PencilLine, ShieldAl
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { formatToolCallLabel, toolSource, type ToolCallRecord } from "@/src/skills/cursorTool";
+import {
+  formatToolCallLabel,
+  toolSource,
+  type ToolCallRecord,
+  type ToolCallSource,
+} from "@/src/skills/cursorTool";
 
 export type { ToolCallRecord };
 
@@ -278,6 +283,14 @@ export function RunMeta({
   );
 }
 
+const sourceBadgeClass: Record<ToolCallSource, string> = {
+  "markdown-health": "border-cyan-200 bg-cyan-50 text-cyan-700",
+  filesystem: "border-slate-200 bg-slate-50 text-slate-700",
+  weather: "border-sky-200 bg-sky-50 text-sky-800",
+  notion: "border-violet-200 bg-violet-50 text-violet-700",
+  local: "border-emerald-200 bg-emerald-50 text-emerald-700",
+};
+
 export function ToolCallsList({ toolCalls }: { toolCalls: ToolCallRecord[] }) {
   return (
     <div className="space-y-3">
@@ -288,7 +301,7 @@ export function ToolCallsList({ toolCalls }: { toolCalls: ToolCallRecord[] }) {
       {toolCalls.length ? (
         <ol className="flex flex-wrap gap-2">
           {toolCalls.map((call, index) => {
-            const source = toolSource(call.name);
+            const source = toolSource(call);
             return (
             <li
               key={`${call.name}-${index}`}
@@ -301,13 +314,11 @@ export function ToolCallsList({ toolCalls }: { toolCalls: ToolCallRecord[] }) {
                   <Badge
                     variant="outline"
                     className={cn(
-                      "h-5 rounded-sm px-1.5 text-[10px] font-semibold tracking-wide uppercase",
-                      source === "MCP"
-                        ? "border-cyan-200 bg-cyan-50 text-cyan-700"
-                        : "border-emerald-200 bg-emerald-50 text-emerald-700",
+                      "h-5 rounded-sm px-1.5 text-[10px] font-semibold tracking-wide",
+                      sourceBadgeClass[source],
                     )}
                   >
-                    {source}
+                    [{source}]
                   </Badge>
                 ) : null}
               </span>

@@ -1,4 +1,9 @@
-import { createMarkdownHealthMcpClient } from "../src/mcp/stdioClient";
+import { config as loadDotenv } from "dotenv";
+import {
+  createConfiguredMcpClient,
+  enabledHealthMcpConfigs,
+} from "../src/mcp/stdioClient";
+import { healthMcpServerConfigs } from "../src/mcp/servers.config";
 
 function textFromResource(value: unknown): string {
   if (!value || typeof value !== "object") return "";
@@ -15,27 +20,60 @@ function preview(text: string) {
 }
 
 async function main() {
-  const server = await createMarkdownHealthMcpClient(process.cwd());
+  loadDotenv({ path: ".env", quiet: true });
+  const root = process.cwd();
+  const enabled = enabledHealthMcpConfigs();
+  const skipped = healthMcpServerConfigs.filter((config) => !enabled.includes(config));
 
-  try {
-    const tools = await server.listTools();
-    const resources = await server.listResources();
+  console.log("Configured MCP servers:");
+  for (const config of healthMcpServerConfigs) {
+    const status = enabled.includes(config) ? "enabled" : "skipped";
+    console.log(`- ${config.name}: ${status}`);
+  }
 
-    console.log("MCP server: markdown-health");
-    console.log("\nTools:");
-    for (const tool of tools) {
-      console.log(`- ${tool.name}${tool.description ? `: ${tool.description}` : ""}`);
+  if (skipped.length) {
+    console.log("\nSkipped (disabled or missing env):");
+    for (const config of skipped) {
+      const reason = config.enableWhenEnv
+        ? `needs ${config.enableWhenEnv}`
+        : "enabled: false";
+      console.log(`- ${config.name}: ${reason}`);
     }
+  }
 
-    console.log("\nResources:");
-    for (const resource of resources) {
-      const readResult = await server.readResource(resource.uri);
-      const text = textFromResource(readResult);
-      console.log(`- ${resource.uri}${resource.name ? ` (${resource.name})` : ""}`);
-      console.log(`  ${text ? preview(text) : "empty resource"}`);
+  for (const config of enabled) {
+    try {
+      const client = await createConfiguredMcpClient(root, config);
+      try {
+        const tools = await client.listTools();
+        console.log(`\nMCP server: ${config.name}`);
+        console.log("Tools:");
+        for (const tool of tools) {
+          console.log(`- ${tool.name}${tool.description ? `: ${tool.description}` : ""}`);
+        }
+
+        try {
+          const resources = await client.listResources();
+          if (!resources.length) continue;
+          console.log("Resources:");
+          for (const resource of resources) {
+            const readResult = await client.readResource(resource.uri);
+            const text = textFromResource(readResult);
+            console.log(`- ${resource.uri}${resource.name ? ` (${resource.name})` : ""}`);
+            console.log(`  ${text ? preview(text) : "empty resource"}`);
+          }
+        } catch {
+          // External servers may expose tools only.
+        }
+      } finally {
+        await client.close();
+      }
+    } catch (error) {
+      console.log(`\nMCP server: ${config.name}`);
+      console.log(
+        `  failed to start: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
-  } finally {
-    await server.close();
   }
 }
 
