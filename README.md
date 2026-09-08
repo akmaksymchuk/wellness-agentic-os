@@ -9,6 +9,11 @@ Runtime uses Cursor SDK (`composer-2.5` by default) instead of DeepSeek / OpenAI
 1. `npm install`
 2. Create `.env` with `CURSOR_API_KEY` from [Cursor Dashboard → Integrations](https://cursor.com/dashboard/integrations). Optional: `CURSOR_MODEL=composer-2.5`.
 3. Optional: `NOTION_TOKEN` for the official Notion MCP (disabled until the token is present).
+4. RAG (optional until you need knowledge search): add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. Run the SQL in `docs/001_create_knowledge_chunks.sql` (same as `supabase/migrations/001_knowledge.sql`). For local embeddings, install [Ollama](https://ollama.com), `ollama pull nomic-embed-text`, keep Ollama running, then `npm run ingest`. Defaults: `EMBEDDING_PROVIDER=ollama`, `EMBEDDING_BASE_URL=http://127.0.0.1:11434/v1`, `EMBEDDING_MODEL=nomic-embed-text`, `EMBEDDING_DIM=768`. To switch later to an OpenAI-compatible embeddings key, set `EMBEDDING_PROVIDER=openai`, `EMBEDDING_API_KEY`, model and dim, apply `docs/002_resize_embedding_dim.sql` if the dim changes, then ingest again. Do not use `CURSOR_API_KEY` for embeddings.
+
+## Memory vs RAG
+
+`data/profile.md` and `data/log.md` are personal memory: who you are and what you logged. They stay in markdown and MCP and are never copied into Postgres. `data/recipes.md` is the same layer — favorite dishes for this person, via `list_recipes`. `knowledge/*.md` is shared know-how (recipes, nutrition, training, recovery) that ingest splits by `##`, embeds, and stores in Supabase `knowledge_chunks`. The coach should call `searchKnowledge` first and not invent meals from scratch; retrieval is one embed and one cosine search. Cursor runs the agent loop; embeddings use a separate OpenAI-compatible endpoint (Ollama now, another key later), and a model change requires a full re-ingest.
 
 ## Run
 
@@ -22,7 +27,8 @@ The coach reads markdown data, optional filesystem access, weather forecasts, an
 Notion tools through MCP servers configured in `src/mcp/servers.config.ts`.
 Approved plans are saved to `data/output.md` through the local markdown MCP;
 generated shopping lists still use a local tool and are saved to
-`data/shopping.md`.
+`data/shopping.md`. Knowledge search uses the local `searchKnowledge` tool after
+`npm run ingest`.
 
 ## MCP
 
@@ -30,7 +36,9 @@ MCP servers are configured in `src/mcp/servers.config.ts`. Adding a server is a
 new config entry with `{ name, command, args, env?, enabled }`; the harness does
 not need per-server code changes. Enabled servers are passed to Cursor SDK as
 inline `mcpServers`; the SDK starts the stdio processes. Traces/UI mark every
-call as `[markdown-health]`, `[filesystem]`, `[weather]`, `[notion]`, or `[local]`.
+call as `[MCP · markdown-health]`, `[MCP · filesystem]`, `[MCP · weather]`,
+`[MCP · notion]`, `[local · shopping]` / `[local · workouts]`, or
+`[RAG · knowledge]`.
 
 A server with `enabled: false` is skipped unless its `enableWhenEnv` variable is
 set (Notion + `NOTION_TOKEN`). Missing token = silent skip, no error.
@@ -136,9 +144,9 @@ Resources:
 
 До MCP каждая интеграция с локальными данными подключалась к агенту вручную как отдельный `customTool`: профиль, дневник, рецепты и сохранение плана жили рядом с кодом агента.
 
-После MCP эти markdown-данные доступны через стандартный stdio-сервер. Для Health Coach это такие же tools в trace, но источник теперь внешний процесс с единым протоколом. Локальными tools намеренно остались только `generateShoppingList` и `suggestWorkoutTemplate`, чтобы было видно различие: вычислительные/шаблонные действия остаются рядом с приложением, а доступ к данным идет через MCP.
+После MCP эти markdown-данные доступны через стандартный stdio-сервер. Для Health Coach это такие же tools в trace, но источник теперь внешний процесс с единым протоколом. Локальными tools остаются `generateShoppingList`, `suggestWorkoutTemplate` и `searchKnowledge`: первые два считают шаблоны в приложении, RAG ходит в pgvector через прямой fetch.
 
-В `src/skills/` активны только `shopping.ts` и `workouts.ts`. Старые прямые wrappers для markdown-данных помечены как `*.legacy.ts`: они оставлены как учебный пример состояния «до MCP», но агент их больше не подключает.
+В `src/skills/` активны `shopping.ts`, `workouts.ts` и `knowledge.ts`. Старые прямые wrappers для markdown-данных помечены как `*.legacy.ts`: они оставлены как учебный пример состояния «до MCP», но агент их больше не подключает.
 
 ## Как дебажить агента
 
@@ -158,6 +166,7 @@ Replay берет задачу из trace, запускает текущий `ru
 npm run eval
 ```
 
-Eval последовательно прогоняет 5 JSON-кейсов из `evals/cases/` и печатает таблицу
+Eval последовательно прогоняет JSON-кейсы из `evals/cases/` и печатает таблицу
 PASS/FAIL. Кейс `bad-medical-request` ожидает `needs_human_professional` и проходит
-только если safety gate остановил запуск до коуча.
+только если safety gate остановил запуск до коуча. Кейс `knowledge-based-recipe`
+проверяет retrieval: `searchKnowledge` вернул хотя бы один chunk из `recipes.md`.

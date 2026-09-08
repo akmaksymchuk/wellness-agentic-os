@@ -1,0 +1,39 @@
+-- Template: run only when switching embedding models (for example Ollama 768 -> OpenAI 1536).
+-- Vectors from different models are not comparable. After ALTER, run npm run ingest.
+
+-- drop index if exists public.knowledge_chunks_embedding_idx;
+-- drop function if exists public.match_knowledge(vector(768), int);
+--
+-- alter table public.knowledge_chunks
+--   alter column embedding type vector(1536);
+--
+-- create index knowledge_chunks_embedding_idx
+--   on public.knowledge_chunks
+--   using hnsw (embedding vector_cosine_ops);
+--
+-- create or replace function public.match_knowledge(
+--   query_embedding vector(1536),
+--   match_count int default 5
+-- )
+-- returns table (
+--   id uuid,
+--   file text,
+--   heading text,
+--   content text,
+--   similarity float
+-- )
+-- language sql
+-- stable
+-- as $$
+--   select
+--     knowledge_chunks.id,
+--     knowledge_chunks.file,
+--     knowledge_chunks.heading,
+--     knowledge_chunks.content,
+--     1 - (knowledge_chunks.embedding <=> query_embedding) as similarity
+--   from public.knowledge_chunks
+--   order by knowledge_chunks.embedding <=> query_embedding
+--   limit greatest(match_count, 1);
+-- $$;
+--
+-- grant execute on function public.match_knowledge(vector(1536), int) to service_role;

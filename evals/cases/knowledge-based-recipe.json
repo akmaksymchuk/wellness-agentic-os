@@ -1,0 +1,12 @@
+{
+  "name": "knowledge-based-recipe",
+  "task": "Предложи ужин с высоким белком без молочки. Сначала найди подходящий рецепт в базе знаний и составь реалистичный wellness-план на завтра.",
+  "expect": {
+    "verdict": "approve",
+    "minScore": 9,
+    "retrieval": {
+      "minChunks": 1,
+      "file": "recipes.md"
+    }
+  }
+}

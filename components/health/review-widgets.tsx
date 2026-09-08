@@ -1,11 +1,14 @@
 import type { LucideIcon } from "lucide-react";
-import { BookOpen, ChevronDown, CircleCheckBig, ListChecks, PencilLine, ShieldAlert, Timer } from "lucide-react";
+import { BookOpen, ChevronDown, CircleCheckBig, ListChecks, PencilLine, Search, ShieldAlert, Timer } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import {
-  formatToolCallLabel,
+  formatToolCallBadge,
+  formatToolCallDetail,
+  toolCallKind,
   toolSource,
+  type ToolCallKind,
   type ToolCallRecord,
   type ToolCallSource,
 } from "@/src/skills/cursorTool";
@@ -291,6 +294,22 @@ const sourceBadgeClass: Record<ToolCallSource, string> = {
   local: "border-emerald-200 bg-emerald-50 text-emerald-700",
 };
 
+const kindBadgeClass: Record<ToolCallKind, string> = {
+  rag: "border-sky-200 bg-sky-50 text-sky-800",
+  mcp: "border-cyan-200 bg-cyan-50 text-cyan-700",
+  local: "border-emerald-200 bg-emerald-50 text-emerald-700",
+};
+
+function badgeClass(call: ToolCallRecord): string {
+  const kind = toolCallKind(call);
+  if (kind === "mcp") {
+    const source = toolSource(call);
+    if (source) return sourceBadgeClass[source];
+  }
+  if (kind) return kindBadgeClass[kind];
+  return "border-border bg-muted text-muted-foreground";
+}
+
 export function ToolCallsList({ toolCalls }: { toolCalls: ToolCallRecord[] }) {
   return (
     <div className="space-y-3">
@@ -299,30 +318,40 @@ export function ToolCallsList({ toolCalls }: { toolCalls: ToolCallRecord[] }) {
         Что сделал агент
       </p>
       {toolCalls.length ? (
-        <ol className="flex flex-wrap gap-2">
+        <ol className="space-y-2">
           {toolCalls.map((call, index) => {
-            const source = toolSource(call);
+            const badge = formatToolCallBadge(call);
+            const detail = formatToolCallDetail(call);
+            const kind = toolCallKind(call);
             return (
-            <li
-              key={`${call.name}-${index}`}
-              className="bg-muted/45 text-foreground inline-flex min-h-8 items-center gap-2 rounded-md px-2.5 py-1.5 text-xs font-medium"
-            >
-              <span className="text-muted-foreground tabular-nums">{index + 1}</span>
-              <span className="flex flex-wrap items-center gap-1.5">
-                <span>{formatToolCallLabel(call)}</span>
-                {source ? (
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      "h-5 rounded-sm px-1.5 text-[10px] font-semibold tracking-wide",
-                      sourceBadgeClass[source],
-                    )}
-                  >
-                    [{source}]
-                  </Badge>
-                ) : null}
-              </span>
-            </li>
+              <li
+                key={`${call.name}-${index}`}
+                className="bg-muted/45 text-foreground flex gap-2 rounded-md px-2.5 py-2 text-xs font-medium"
+              >
+                <span className="text-muted-foreground w-4 shrink-0 tabular-nums">{index + 1}</span>
+                <div className="min-w-0 space-y-0.5">
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    {kind === "rag" ? (
+                      <Search className="size-3.5 text-muted-foreground" aria-hidden="true" />
+                    ) : null}
+                    <span>{call.name}</span>
+                    {badge ? (
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "h-5 rounded-sm px-1.5 text-[10px] font-semibold tracking-wide",
+                          badgeClass(call),
+                        )}
+                      >
+                        {badge}
+                      </Badge>
+                    ) : null}
+                  </span>
+                  {detail ? (
+                    <p className="text-muted-foreground font-normal">{detail}</p>
+                  ) : null}
+                </div>
+              </li>
             );
           })}
         </ol>
