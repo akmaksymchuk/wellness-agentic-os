@@ -18,7 +18,10 @@
 - `lib/utils.ts` — хелпер `cn()` (clsx + tailwind-merge) для shadcn.
 - `components.json` — конфиг shadcn CLI (стиль new-york, alias `@/*`).
 - `src/agents/healthCoach.ts` и `src/agents/safetyReviewer.ts` — определения агентов (name + instructions).
-- `src/skills/` — локальные custom tools коуча (`generateShoppingList`, `suggestWorkoutTemplate`). Markdown-данные ушли в MCP; старые wrappers — `*.legacy.ts`.
+- `src/skills/` — локальные custom tools коуча (`generateShoppingList`, `suggestWorkoutTemplate`, `searchKnowledge`). Markdown-данные ушли в MCP; старые wrappers — `*.legacy.ts`.
+- `src/rag/` — embeddings (OpenAI-compatible fetch), retriever и PostgREST к `knowledge_chunks`.
+- `knowledge/` — учебная база знаний (секции `##`); личный профиль/лог остаются в `data/`.
+- `docs/*.sql` и `supabase/migrations/001_knowledge.sql` — схема pgvector.
 - `src/mcp/servers.config.ts` — описания MCP-серверов (`markdown-health`, `filesystem`, `weather`, `notion`). Новый сервер = новая запись.
 - `src/mcp/markdownHealthServer.ts` — свой stdio MCP-сервер над `data/*.md` (`@modelcontextprotocol/sdk`).
 - `src/mcp/stdioClient.ts` — резолв конфига в `mcpServers` для Cursor SDK и короткий MCP-клиент для inspect / `save_health_plan`.
@@ -26,7 +29,7 @@
 - `src/harness/runHealthAgent.ts` — оркестрация цикла coach/reviewer, safety pre-check, `save_health_plan` через MCP после approve.
 - `src/harness/traceRun.ts` — пишет локальный JSON-трейс в `runs/run-<timestamp>.json` после каждого запуска.
 - `scripts/replay.ts` и `scripts/eval.ts` — replay одного трейса и последовательный прогон мини-evals.
-- `evals/cases/*.json` — пять кейсов (включая safety gate `bad-medical-request`).
+- `evals/cases/*.json` — шесть кейсов (включая safety gate `bad-medical-request` и `knowledge-based-recipe`).
 - `runs/run-example.json` — пример трейса в репозитории; остальные файлы `runs/` в git не попадают.
 - `data/profile.md`, `data/log.md`, `data/output.md`, `data/recipes.md` — локальный профиль, дневник, план и рецепты.
 - `plans/` — копии планов через filesystem MCP; доступ сервера ограничен `data/` и `plans/`.
@@ -39,6 +42,7 @@
 - `npm run start` — запускает production server после успешной сборки.
 - `npm run replay -- runs/run-XXX.json` — прогоняет задачу из трейса через текущий harness и печатает old vs new.
 - `npm run eval` — последовательно прогоняет `evals/cases/*.json` и печатает таблицу PASS/FAIL.
+- `npm run ingest` — очищает `knowledge_chunks` и заново заливает chunks из `knowledge/`.
 - `npm run mcp:inspect` — поднимает enabled MCP-серверы из конфига, печатает tools/resources и закрывает процессы.
 - `npm install` — восстанавливает зависимости из `package-lock.json`.
 
@@ -73,9 +77,9 @@ UI строится на **Tailwind CSS v4 + shadcn/ui** (стиль new-york). 
 
 ## Безопасность и конфигурация агентов
 
-Секреты храните только в `.env`: `CURSOR_API_KEY`, опционально `CURSOR_MODEL` (по умолчанию `composer-2.5`), опционально `NOTION_TOKEN`. Ключ: Cursor Dashboard → Integrations. Не коммитьте `.env`.
+Секреты храните только в `.env`: `CURSOR_API_KEY`, опционально `CURSOR_MODEL` (по умолчанию `composer-2.5`), опционально `NOTION_TOKEN`, для RAG — `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` и блок `EMBEDDING_*`. Ключ агента: Cursor Dashboard → Integrations. Не коммитьте `.env`. Embeddings не берутся из `CURSOR_API_KEY`.
 
-Не переносите цикл coach/reviewer в чат IDE. Не давайте SDK-агенту корень репозитория и не включайте `local.settingSources: ["all"]`. Ревьюер вызывается с `tools: []`. Коуч получает `tools: ["mcp"]`, `local.customTools` (shopping/workouts) и inline stdio `mcpServers` из `servers.config.ts` (без shell/read по репозиторию). `filesystem` ограничен `data/` и `plans/`. Данные markdown-сервера читаются по `HEALTH_DATA_ROOT`. Не добавляйте OAuth, БД, историю сообщений или streaming без явного требования. Промпты и revision loop меняйте только осознанно: это основная бизнес-логика проекта.
+Не переносите цикл coach/reviewer в чат IDE. Не давайте SDK-агенту корень репозитория и не включайте `local.settingSources: ["all"]`. Ревьюер вызывается с `tools: []`. Коуч получает `tools: ["mcp"]`, `local.customTools` (shopping/workouts/searchKnowledge) и inline stdio `mcpServers` из `servers.config.ts` (без shell/read по репозиторию). `filesystem` ограничен `data/` и `plans/`. Данные markdown-сервера читаются по `HEALTH_DATA_ROOT`. Не добавляйте OAuth, историю сообщений или streaming без явного требования. Личную память (`profile`/`log`) не переносите в БД; pgvector только для `knowledge/`. Промпты и revision loop меняйте только осознанно: это основная бизнес-логика проекта.
 
 ## Принципы кодовой базы
 

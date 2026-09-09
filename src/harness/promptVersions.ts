@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 /** Смена версии подхватывает prompts/<name>.<version>.md без правок оркестратора. */
 export const ACTIVE_PROMPTS = {
-  coach: "v5",
+  coach: "v6",
   reviewer: "v2",
 } as const;
 

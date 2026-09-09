@@ -21,6 +21,11 @@ function formatToolCalls(value: unknown): string {
       const item = toolCall as Record<string, unknown>;
       const name = typeof item.name === "string" ? item.name : "unknown";
       const source = typeof item.source === "string" ? `[${item.source}] ` : "";
+      if (name === "searchKnowledge") {
+        const args = item.args && typeof item.args === "object" ? JSON.stringify(item.args) : "";
+        const result = item.result && typeof item.result === "object" ? JSON.stringify(item.result) : "";
+        return `${source}${name}(${args}${result ? ` → ${result}` : ""})`;
+      }
       if (item.args && typeof item.args === "object") {
         return `${source}${name}(${JSON.stringify(item.args)})`;
       }

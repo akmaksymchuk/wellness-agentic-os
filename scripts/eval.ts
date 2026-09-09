@@ -11,6 +11,10 @@ type EvalCase = {
   expect: {
     verdict: ExpectedVerdict;
     minScore?: number;
+    retrieval?: {
+      minChunks: number;
+      file?: string;
+    };
   };
 };
 
@@ -22,6 +26,7 @@ type EvalRow = {
   score: string;
   rounds: number | "-";
   toolCalls: number | "-";
+  retrieval: string;
   note: string;
 };
 
@@ -50,6 +55,20 @@ function assertEvalCase(value: unknown, file: string): asserts value is EvalCase
   ) {
     throw new Error(`${file}: expect.minScore must be a finite number.`);
   }
+  if (typeof expect.retrieval !== "undefined") {
+    if (!expect.retrieval || typeof expect.retrieval !== "object" || Array.isArray(expect.retrieval)) {
+      throw new Error(`${file}: expect.retrieval must be an object.`);
+    }
+    if (!Number.isInteger(expect.retrieval.minChunks) || expect.retrieval.minChunks <= 0) {
+      throw new Error(`${file}: expect.retrieval.minChunks must be a positive integer.`);
+    }
+    if (
+      typeof expect.retrieval.file !== "undefined" &&
+      (typeof expect.retrieval.file !== "string" || !expect.retrieval.file.trim())
+    ) {
+      throw new Error(`${file}: expect.retrieval.file must be a non-empty string.`);
+    }
+  }
 }
 
 async function loadCases(root: string): Promise<EvalCase[]> {
@@ -69,9 +88,17 @@ async function loadCases(root: string): Promise<EvalCase[]> {
 }
 
 function formatExpected(testCase: EvalCase) {
-  return typeof testCase.expect.minScore === "number"
-    ? `${testCase.expect.verdict}, score >= ${testCase.expect.minScore}`
-    : testCase.expect.verdict;
+  const expected: string[] = [testCase.expect.verdict];
+  if (typeof testCase.expect.minScore === "number") {
+    expected.push(`score >= ${testCase.expect.minScore}`);
+  }
+  if (testCase.expect.retrieval) {
+    const file = testCase.expect.retrieval.file?.trim();
+    expected.push(
+      `retrieval >= ${testCase.expect.retrieval.minChunks} chunks${file ? ` from ${file}` : ""}`,
+    );
+  }
+  return expected.join(", ");
 }
 
 async function runCase(root: string, testCase: EvalCase): Promise<EvalRow> {
@@ -80,20 +107,35 @@ async function runCase(root: string, testCase: EvalCase): Promise<EvalRow> {
     const score = result.finalScore ?? result.review.score;
     const verdictMatches = result.review.verdict === testCase.expect.verdict;
     const scoreMatches =
-      typeof testCase.expect.minScore === "number"
-        ? score >= testCase.expect.minScore
-        : true;
+      typeof testCase.expect.minScore === "number" ? score >= testCase.expect.minScore : true;
     const safetyGateStopped =
       testCase.expect.verdict !== "needs_human_professional" ||
       (result.plan.trim() === "" && result.toolCalls.length === 0);
-    const passed = verdictMatches && scoreMatches && safetyGateStopped;
+    const knowledgeCalls = result.toolCalls.filter((call) => call.name === "searchKnowledge");
+    const retrievedChunks = knowledgeCalls.flatMap((call) => call.chunks ?? []);
+    const retrievedFiles = [...new Set(retrievedChunks.map((chunk) => chunk.file))];
+    const retrievalExpected = testCase.expect.retrieval;
+    const expectedFile = retrievalExpected?.file?.trim();
+    const matchingChunks = expectedFile
+      ? retrievedChunks.filter((chunk) => chunk.file === expectedFile)
+      : retrievedChunks;
+    const retrievalMatches =
+      !retrievalExpected ||
+      (knowledgeCalls.length > 0 && matchingChunks.length >= retrievalExpected.minChunks);
+    const passed = verdictMatches && scoreMatches && safetyGateStopped && retrievalMatches;
     const note = passed
       ? ""
       : !verdictMatches
         ? "verdict mismatch"
         : !scoreMatches
           ? "score below minScore"
-          : "safety gate did not stop before coach";
+          : !safetyGateStopped
+            ? "safety gate did not stop before coach"
+            : knowledgeCalls.length === 0
+              ? "retrieval not called"
+              : expectedFile && matchingChunks.length === 0
+                ? "expected file missing"
+                : "too few matching chunks";
 
     return {
       status: passed ? "PASS" : "FAIL",
@@ -103,6 +145,9 @@ async function runCase(root: string, testCase: EvalCase): Promise<EvalRow> {
       score: String(score),
       rounds: result.rounds.length,
       toolCalls: result.toolCalls.length,
+      retrieval: knowledgeCalls.length
+        ? `${retrievedChunks.length} chunks · ${retrievedFiles.join(", ") || "no files"}`
+        : "not called",
       note,
     };
   } catch (error) {
@@ -114,6 +159,7 @@ async function runCase(root: string, testCase: EvalCase): Promise<EvalRow> {
       score: "-",
       rounds: "-",
       toolCalls: "-",
+      retrieval: "-",
       note: error instanceof Error ? error.message : String(error),
     };
   }
