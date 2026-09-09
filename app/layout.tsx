@@ -11,7 +11,7 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: "Health Coach Agent",
-  description: "Local wellness agent runner",
+  description: "Чат Health Coach Agent: живой таймлайн и план через Cursor SDK",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
