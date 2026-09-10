@@ -1,4 +1,4 @@
-import { runHealthAgent } from "../../../../src/harness/runHealthAgent";
+import { runOS } from "../../../../src/os/runOS";
 
 export const runtime = "nodejs";
 
@@ -11,7 +11,7 @@ export async function POST(request: Request) {
       return Response.json({ error: "Передай непустую задачу." }, { status: 400 });
     }
 
-    const result = await runHealthAgent(task);
+    const result = await runOS(task);
     return Response.json(result);
   } catch (error) {
     console.error(error);

@@ -1,0 +1,9 @@
+{
+  "name": "os-habits",
+  "task": "Покажи мои привычки и отметь воду за сегодня.",
+  "expect": {
+    "verdict": "approve",
+    "minScore": 8,
+    "module": "habits"
+  }
+}

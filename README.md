@@ -2,18 +2,18 @@
 
 Simple Next.js App Router chat UI for the Health Coach Agent and Safety Reviewer Agent loop.
 
-Runtime uses Cursor SDK (`composer-2.5` by default) instead of DeepSeek / OpenAI Chat Completions. Cursor IDE + Composer is the coding tool; the coach/reviewer loop still runs in `src/harness/runHealthAgent.ts`. The chat page streams harness stage events through `/api/chat` (Vercel AI SDK as transport only). The JSON endpoint `/api/agent/run` is unchanged.
+Runtime uses Cursor SDK: `classifyIntent` on `composer-2.5`, coach and Safety Reviewer on `grok-4.6`. Cursor IDE + Composer is the coding tool; the coach/reviewer loop still runs in `src/harness/runHealthAgent.ts`, wrapped by `src/os/runOS.ts`. The chat page streams harness stage events through `/api/chat` (Vercel AI SDK as transport only). The JSON endpoint `/api/agent/run` goes through the same OS wrapper.
 
 ## Setup
 
 1. `npm install`
-2. Create `.env` with `CURSOR_API_KEY` from [Cursor Dashboard → Integrations](https://cursor.com/dashboard/integrations). Optional: `CURSOR_MODEL=composer-2.5`.
+2. Create `.env` with `CURSOR_API_KEY` from [Cursor Dashboard → Integrations](https://cursor.com/dashboard/integrations). Optional: `CURSOR_MODEL=grok-4.6` (coach/reviewer), `CURSOR_ROUTER_MODEL=composer-2.5` (intent only).
 3. Optional: `NOTION_TOKEN` for the official Notion MCP (disabled until the token is present).
 4. RAG (optional until you need knowledge search): add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. Run the SQL in `docs/001_create_knowledge_chunks.sql` (same as `supabase/migrations/001_knowledge.sql`). For local embeddings, install [Ollama](https://ollama.com), `ollama pull nomic-embed-text`, keep Ollama running, then `npm run ingest`. Defaults: `EMBEDDING_PROVIDER=ollama`, `EMBEDDING_BASE_URL=http://127.0.0.1:11434/v1`, `EMBEDDING_MODEL=nomic-embed-text`, `EMBEDDING_DIM=768`. To switch later to an OpenAI-compatible embeddings key, set `EMBEDDING_PROVIDER=openai`, `EMBEDDING_API_KEY`, model and dim, apply `docs/002_resize_embedding_dim.sql` if the dim changes, then ingest again. Do not use `CURSOR_API_KEY` for embeddings.
 
 ## Memory vs RAG
 
-`data/profile.md` and `data/log.md` are personal memory: who you are and what you logged. They stay in markdown and MCP and are never copied into Postgres. `data/recipes.md` is the same layer — favorite dishes for this person, via `list_recipes`. `knowledge/*.md` is shared know-how (recipes, nutrition, training, recovery) that ingest splits by `##`, embeds, and stores in Supabase `knowledge_chunks`. The coach should call `searchKnowledge` first and not invent meals from scratch; retrieval is one embed and one cosine search. Cursor runs the agent loop; embeddings use a separate OpenAI-compatible endpoint (Ollama now, another key later), and a model change requires a full re-ingest.
+`data/profile.md` and `data/log.md` are personal memory: who you are and what you logged. They stay in markdown and MCP and are never copied into Postgres. `data/recipes.md` is the same layer — favorite dishes for this person, via `list_recipes`. `data/habits.md` is the habit tracker (`read_habits` / `check_habit`). `data/preferences.md` is harness-only: confirmed likes after an explicit «запомни». `knowledge/*.md` is shared know-how (recipes, nutrition, training, recovery) that ingest splits by `##`, embeds, and stores in Supabase `knowledge_chunks`. The coach should call `searchKnowledge` first and not invent meals from scratch; retrieval is one embed and one cosine search. Cursor runs the agent loop; embeddings use a separate OpenAI-compatible endpoint (Ollama now, another key later), and a model change requires a full re-ingest.
 
 ## Run
 
@@ -52,7 +52,7 @@ tools/resources, and closes the processes.
 
 | Server | Package / command | What it gives | Authorization |
 | --- | --- | --- | --- |
-| `markdown-health` | local `src/mcp/markdownHealthServer.ts` | `read_profile`, `read_recent_logs`, `append_daily_log`, `save_health_plan`, `list_recipes` over local markdown data | none |
+| `markdown-health` | local `src/mcp/markdownHealthServer.ts` | `read_profile`, `read_recent_logs`, `list_recipes`, `read_habits`, `check_habit`; harness-only `append_daily_log`, `save_health_plan`, `update_preferences` | none |
 | `filesystem` | `@modelcontextprotocol/server-filesystem` via `npx` | file access for explicit save/read tasks | none; launch args allow only `data/` and `plans/` |
 | `weather` | `@cynosure-mcp/weather` via `npx` | Open-Meteo current weather and forecast tools by city or coordinates | none; Open-Meteo is keyless for this use |
 | `notion` | official `@notionhq/notion-mcp-server` via `npx` | Notion API tools, including page creation/update | `NOTION_TOKEN`; disabled by default and auto-starts only when the token is present |
@@ -61,8 +61,9 @@ Selected weather package: `@cynosure-mcp/weather@1.0.4`. It runs on local Node,
 uses the free Open-Meteo API, requires no API key, supports stdio, and exposes
 forecast tools by city or coordinates.
 
-Harness keeps a separate short-lived MCP client for `save_health_plan` after
-reviewer approve. The coach is not given that tool.
+Harness keeps a separate short-lived MCP client for `save_health_plan`,
+`append_daily_log`, and `update_preferences` after reviewer approve. The coach
+is not given those tools.
 
 ### Guardrails
 
@@ -130,9 +131,12 @@ Not connected here:
 Tools:
 - `read_profile`
 - `read_recent_logs`
-- `append_daily_log`
-- `save_health_plan`
+- `append_daily_log` (harness after approve)
+- `save_health_plan` (harness after approve)
+- `update_preferences` (harness after «запомни» / «мне понравилось»)
 - `list_recipes`
+- `read_habits`
+- `check_habit`
 
 Resources:
 - `profile://me` -> `data/profile.md`
@@ -148,18 +152,22 @@ Resources:
 
 В `src/skills/` активны `shopping.ts`, `workouts.ts` и `knowledge.ts`. Старые прямые wrappers для markdown-данных помечены как `*.legacy.ts`: они оставлены как учебный пример состояния «до MCP», но агент их больше не подключает.
 
+## Путь проекта
+
+Сначала это был один агент с инструкциями: Health Coach пишет план, Safety Reviewer его проверяет. UI появился как тонкая оболочка — сначала JSON-кнопка, затем чат со стримом этапов. Harness собрал цикл в код: раунды, pre-check, сохранение только после approve. Локальные tools (список покупок, шаблон тренировки) остались в процессе приложения. Traces в `runs/` дали replay и eval без внешнего трейсера. MCP вынес профиль, лог и рецепты в stdio-сервер, а filesystem / weather / Notion подключаются конфигом. RAG добавил общую базу `knowledge/` в pgvector через `searchKnowledge`. Чат связал эти события в таймлайн. OS-слой поверх того же агента: `classifyIntent` выбирает модуль по описанию, harness получает другой промпт и набор tools, reviewer остаётся инвариантом, после approve обновляется память.
+
 ## Как дебажить агента
 
 Каждый успешный запуск сохраняет локальный trace в `runs/run-<timestamp>.json`.
-Внутри есть задача, версии промптов, модель (`CURSOR_MODEL` / `composer-2.5`), раунды ревью, вызовы tools, итоговый score,
+Внутри есть задача, версии промптов, модель коуча (`CURSOR_MODEL` / `grok-4.6`), модуль и `intentConfidence`, раунды ревью, вызовы tools, итоговый score,
 verdict и длительность. Сами файлы в `runs/` в git не попадают, кроме `runs/run-example.json`.
 
 ```bash
 npm run replay runs/run-XXX.json
 ```
 
-Replay берет задачу из trace, запускает текущий `runHealthAgent` и показывает old vs new
-по verdict, score, раундам, toolCalls и promptVersions. Это удобно после правки промпта
+Replay берет задачу из trace, запускает текущий `runOS` и показывает old vs new
+по verdict, score, module, раундам, toolCalls и promptVersions. Это удобно после правки промпта
 или модели.
 
 ```bash
@@ -170,3 +178,5 @@ Eval последовательно прогоняет JSON-кейсы из `eva
 PASS/FAIL. Кейс `bad-medical-request` ожидает `needs_human_professional` и проходит
 только если safety gate остановил запуск до коуча. Кейс `knowledge-based-recipe`
 проверяет retrieval: `searchKnowledge` вернул хотя бы один chunk из `recipes.md`.
+Три OS-кейса (`os-a-daily-plan`, `os-b-recipes-dinner`, `os-c-habits`) проверяют
+выбор модуля; habits специально идёт после recipes в том же процессе.

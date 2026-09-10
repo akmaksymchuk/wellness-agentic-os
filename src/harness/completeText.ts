@@ -21,7 +21,7 @@ const COACH_TOOLS = `
 Не читай и не меняй файлы репозитория напрямую и не запускай команды в терминале.
 Профиль, дневник и личные рецепты бери через markdown-health.
 Список покупок, шаблон тренировки и поиск в базе знаний (searchKnowledge) — через custom tools.
-Не вызывай save_health_plan: план сохраняет harness после одобрения Safety Reviewer.
+Не вызывай save_health_plan, append_daily_log и update_preferences: их вызывает harness после одобрения Safety Reviewer.
 `.trim();
 
 const KNOWN_MCP_SOURCES = new Set<HealthMcpServerName>([
@@ -51,7 +51,11 @@ function asArgs(value: unknown): Record<string, SDKJsonValue> | undefined {
 }
 
 function sourceFromProvider(providerIdentifier: string | undefined): ToolCallSource {
-  if (providerIdentifier && KNOWN_MCP_SOURCES.has(providerIdentifier as HealthMcpServerName)) {
+  if (!providerIdentifier) return "markdown-health";
+  if (providerIdentifier === "markdown-health" || providerIdentifier.startsWith("markdown-health-")) {
+    return "markdown-health";
+  }
+  if (KNOWN_MCP_SOURCES.has(providerIdentifier as HealthMcpServerName)) {
     return providerIdentifier as HealthMcpServerName;
   }
   return "markdown-health";

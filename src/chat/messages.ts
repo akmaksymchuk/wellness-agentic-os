@@ -45,7 +45,17 @@ const TimelineToolSchema = z.object({
   toolCall: ToolCallRecordSchema,
 });
 
-export const TimelineDataSchema = z.discriminatedUnion("kind", [TimelineStageSchema, TimelineToolSchema]);
+const TimelineModuleSchema = z.object({
+  kind: z.literal("module"),
+  module: z.string().min(1),
+  confidence: z.number().min(0).max(1),
+});
+
+export const TimelineDataSchema = z.discriminatedUnion("kind", [
+  TimelineStageSchema,
+  TimelineToolSchema,
+  TimelineModuleSchema,
+]);
 
 export const ResultDataSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -105,6 +115,18 @@ export function eventToTimelinePart(event: RunHealthAgentEvent) {
       data: {
         kind: "tool" as const,
         toolCall: event.toolCall,
+      },
+    };
+  }
+
+  if (event.type === "module") {
+    return {
+      type: "data-timeline" as const,
+      id: `module-${event.module}`,
+      data: {
+        kind: "module" as const,
+        module: event.module,
+        confidence: event.confidence,
       },
     };
   }

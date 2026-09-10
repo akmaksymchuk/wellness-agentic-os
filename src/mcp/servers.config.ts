@@ -12,11 +12,13 @@ export type HealthMcpServerConfig = {
   allowedTools?: string[];
 };
 
+/** Coach-visible markdown-health tools. Harness-only: save_health_plan, append_daily_log, update_preferences. */
 export const HEALTH_COACH_MCP_TOOLS = [
   "read_profile",
   "read_recent_logs",
-  "append_daily_log",
   "list_recipes",
+  "read_habits",
+  "check_habit",
 ] as const;
 
 const npxCommand = process.platform === "win32" ? "npx.cmd" : "npx";

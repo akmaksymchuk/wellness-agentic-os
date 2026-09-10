@@ -7,13 +7,13 @@
 Два слоя инструментов (как у автора курса: IDE пишет систему, код оркестрирует агентов):
 
 - **Разработка:** Cursor IDE + Composer — аналог Codex / Claude Code. Правки кода живут здесь, не в чате вместо кнопки Run Agent.
-- **Runtime продукта:** `@cursor/sdk` (`completeText`) вызывает Composer как модель. Оркестрация coach/reviewer остаётся в `runHealthAgent.ts`.
+- **Runtime продукта:** `@cursor/sdk` (`completeText`). Роутер (`classifyIntent`) — `composer-2.5`; коуч и Safety Reviewer — `grok-4.6`. Оркестрация coach/reviewer в `runHealthAgent.ts`, вход продукта — `src/os/runOS.ts`.
 
 - `app/page.tsx` — клиентский чат (`useChat`): одно окно, история только в RAM, без персиста.
 - `app/layout.tsx` — root layout, подключает шрифт `Inter` через `next/font` и `globals.css`.
 - `app/globals.css` — Tailwind v4 + дизайн-токены темы (см. «Дизайн-система и UI»).
-- `app/api/chat/route.ts` — POST `/api/chat`, UI-стрим (таймлайн + план) над `runHealthAgent`. Модель не вызывает.
-- `app/api/agent/run/route.ts` — POST `/api/agent/run`, JSON-ответ harness без стрима. Нужен eval/replay и внешним клиентам.
+- `app/api/chat/route.ts` — POST `/api/chat`, UI-стрим (таймлайн + план) над `runOS`. Модель не вызывает.
+- `app/api/agent/run/route.ts` — POST `/api/agent/run`, JSON-ответ OS/harness без стрима. Нужен eval/replay и внешним клиентам.
 - `src/chat/messages.ts` — схемы data-parts чата, `sessionContext` из истории, капля готового плана.
 - `components/chat/*` — лента сообщений и живой таймлайн этапов/tool calls.
 - `components/ui/*` — примитивы shadcn/ui (button, card, badge, alert, textarea, label, skeleton, separator).
@@ -29,12 +29,13 @@
 - `src/mcp/markdownHealthServer.ts` — свой stdio MCP-сервер над `data/*.md` (`@modelcontextprotocol/sdk`).
 - `src/mcp/stdioClient.ts` — резолв конфига в `mcpServers` для Cursor SDK и короткий MCP-клиент для inspect / `save_health_plan`.
 - `src/harness/completeText.ts` — адаптер `@cursor/sdk`: ревьюер `tools: []`, коуч `tools: ["mcp"]` + `customTools` + inline `mcpServers`.
-- `src/harness/runHealthAgent.ts` — оркестрация цикла coach/reviewer, safety pre-check, `save_health_plan` через MCP после approve. Опциональные `onEvent` и `sessionContext` не меняют JSON-API и evals.
-- `src/harness/traceRun.ts` — пишет локальный JSON-трейс в `runs/run-<timestamp>.json` после каждого запуска.
-- `scripts/replay.ts` и `scripts/eval.ts` — replay одного трейса и последовательный прогон мини-evals.
-- `evals/cases/*.json` — шесть кейсов (включая safety gate `bad-medical-request` и `knowledge-based-recipe`).
+- `src/harness/runHealthAgent.ts` — оркестрация цикла coach/reviewer, safety pre-check, `save_health_plan` + `append_daily_log` через MCP после approve. Safety Reviewer обязателен для каждого модуля.
+- `src/os/` — модули (`src/os/modules/`), `classifyIntent` (`router.ts`), обёртка `runOS.ts`. Модуль = `{ name, description, promptFile, tools }`, не отдельный агент.
+- `src/harness/traceRun.ts` — пишет локальный JSON-трейс в `runs/run-<timestamp>.json` после каждого запуска (`module`, `intentConfidence`).
+- `scripts/replay.ts` и `scripts/eval.ts` — replay одного трейса и последовательный прогон мини-evals через `runOS`.
+- `evals/cases/*.json` — исходные кейсы плюс три модульных (`os-a-daily-plan`, `os-b-recipes-dinner`, `os-c-habits`).
 - `runs/run-example.json` — пример трейса в репозитории; остальные файлы `runs/` в git не попадают.
-- `data/profile.md`, `data/log.md`, `data/output.md`, `data/recipes.md` — локальный профиль, дневник, план и рецепты.
+- `data/profile.md`, `data/log.md`, `data/output.md`, `data/recipes.md`, `data/habits.md`, `data/preferences.md` — локальный профиль, дневник, план, рецепты, привычки и подтверждённые предпочтения.
 - `plans/` — копии планов через filesystem MCP; доступ сервера ограничен `data/` и `plans/`.
 - Статические ассеты не используются.
 
@@ -80,7 +81,7 @@ UI строится на **Tailwind CSS v4 + shadcn/ui** (стиль new-york). 
 
 ## Безопасность и конфигурация агентов
 
-Секреты храните только в `.env`: `CURSOR_API_KEY`, опционально `CURSOR_MODEL` (по умолчанию `composer-2.5`), опционально `NOTION_TOKEN`, для RAG — `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` и блок `EMBEDDING_*`. Ключ агента: Cursor Dashboard → Integrations. Не коммитьте `.env`. Embeddings не берутся из `CURSOR_API_KEY`.
+Секреты храните только в `.env`: `CURSOR_API_KEY`, опционально `CURSOR_MODEL` (по умолчанию `grok-4.6` для коуча/ревьюера), опционально `CURSOR_ROUTER_MODEL` (по умолчанию `composer-2.5` для `classifyIntent`), опционально `NOTION_TOKEN`, для RAG — `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` и блок `EMBEDDING_*`. Ключ агента: Cursor Dashboard → Integrations. Не коммитьте `.env`. Embeddings не берутся из `CURSOR_API_KEY`.
 
 Не переносите цикл coach/reviewer в чат IDE. Не давайте SDK-агенту корень репозитория и не включайте `local.settingSources: ["all"]`. Ревьюер вызывается с `tools: []`. Коуч получает `tools: ["mcp"]`, `local.customTools` (shopping/workouts/searchKnowledge) и inline stdio `mcpServers` из `servers.config.ts` (без shell/read по репозиторию). `filesystem` ограничен `data/` и `plans/`. Данные markdown-сервера читаются по `HEALTH_DATA_ROOT`. Не добавляйте OAuth. История чата только в состоянии страницы (без БД и localStorage). Streaming — UI-протокол `/api/chat` (события harness + капля уже готового плана), не замена Cursor SDK и не `run.stream()` коуча. Личную память (`profile`/`log`) не переносите в БД; pgvector только для `knowledge/`. Промпты и revision loop меняйте только осознанно: это основная бизнес-логика проекта.
 

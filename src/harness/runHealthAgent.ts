@@ -4,6 +4,11 @@ import { join } from "node:path";
 import { createHealthCoachAgent, type PromptAgent } from "../agents/healthCoach";
 import { createSafetyReviewerAgent } from "../agents/safetyReviewer";
 import { createMarkdownHealthMcpClient, cursorMcpServers, type MarkdownHealthMcpClient } from "../mcp/stdioClient";
+import {
+  buildDailyLogEntry,
+  buildPreferenceEntry,
+  taskRequestsPreferenceUpdate,
+} from "../os/memory";
 import { createLocalHealthCoachTools, type ToolCallRecord } from "../skills";
 import { completeText } from "./completeText";
 import { ACTIVE_PROMPTS, loadPrompt, type PromptVersions } from "./promptVersions";
@@ -13,6 +18,7 @@ import { traceRun } from "./traceRun";
 import { ReviewSchema, normalizeReview, validateReview, type Review } from "./validateReview";
 
 const DEFAULT_MAX_ROUNDS = 3;
+const DEFAULT_COACH_MODEL = "grok-4.6";
 
 export type { RoundState, Review, PromptVersions, ToolCallRecord };
 
@@ -29,6 +35,8 @@ export type RunHealthAgentResult = {
   promptVersions: PromptVersions;
   toolCalls: ToolCallRecord[];
   durationMs: number;
+  module?: string;
+  intentConfidence?: number;
 };
 
 export type HealthAgentStage =
@@ -52,6 +60,11 @@ export type RunHealthAgentEvent =
   | {
       type: "tool_call";
       toolCall: ToolCallRecord;
+    }
+  | {
+      type: "module";
+      module: string;
+      confidence: number;
     };
 
 export type RunHealthAgentOptions = {
@@ -60,6 +73,10 @@ export type RunHealthAgentOptions = {
   sessionContext?: string;
   onRound?: (round: number, review: Review) => void;
   onEvent?: (event: RunHealthAgentEvent) => void;
+  coachPrompt?: string;
+  allowedTools?: string[];
+  module?: string;
+  intentConfidence?: number;
 };
 
 type Runtime = {
@@ -91,12 +108,6 @@ function reviewTaskSafety(task: string): Review | null {
       })
     : null;
 }
-
-const SHOPPING_LIST_REVIEW: Review = {
-  verdict: "approve",
-  score: 10,
-  issues: [],
-};
 
 function ask(
   runtime: Runtime,
@@ -143,6 +154,10 @@ async function askCoach(
   return ask(runtime, agent, `${buildTaskPrompt(task, sessionContext)}${revision}`, customTools);
 }
 
+/**
+ * Safety Reviewer is an OS invariant: every module, including shoppingList and habits,
+ * goes through this text-only gate. Do not skip it for tool shortcuts.
+ */
 async function askReviewer(
   runtime: Runtime,
   agent: PromptAgent,
@@ -163,8 +178,23 @@ async function askReviewer(
   return normalizeReview(parsed);
 }
 
-async function saveApprovedPlanViaMcp(server: MarkdownHealthMcpClient, markdown: string) {
-  await server.callTool("save_health_plan", { markdown });
+async function persistApprovedRun(
+  server: MarkdownHealthMcpClient,
+  task: string,
+  plan: string,
+  moduleName: string,
+  recordToolCall: (call: ToolCallRecord) => void,
+) {
+  await server.callTool("save_health_plan", { markdown: plan });
+  recordToolCall({ name: "save_health_plan", source: "markdown-health" });
+
+  await server.callTool("append_daily_log", { entry: buildDailyLogEntry(task, moduleName, plan) });
+  recordToolCall({ name: "append_daily_log", source: "markdown-health" });
+
+  if (taskRequestsPreferenceUpdate(task)) {
+    await server.callTool("update_preferences", { note: buildPreferenceEntry(task) });
+    recordToolCall({ name: "update_preferences", source: "markdown-health" });
+  }
 }
 
 function toResult(
@@ -174,11 +204,15 @@ function toResult(
   review: Review,
   rounds: RoundState[],
   toolCalls: ToolCallRecord[],
-  resultKind: RunResultKind = "plan",
+  extras: {
+    resultKind?: RunResultKind;
+    module?: string;
+    intentConfidence?: number;
+  } = {},
 ): RunHealthAgentResult {
   const { finalScore, improved } = summarizeScore(rounds);
   return {
-    resultKind,
+    resultKind: extras.resultKind ?? "plan",
     plan,
     review,
     model,
@@ -188,6 +222,8 @@ function toResult(
     promptVersions: { coach: ACTIVE_PROMPTS.coach, reviewer: ACTIVE_PROMPTS.reviewer },
     toolCalls,
     durationMs: Date.now() - startedAt,
+    module: extras.module,
+    intentConfidence: extras.intentConfidence,
   };
 }
 
@@ -207,8 +243,12 @@ async function runHealthAgentCore(
   const maxRounds = options.maxRounds ?? DEFAULT_MAX_ROUNDS;
   const sessionContext = options.sessionContext?.trim() || undefined;
   const emit = (event: RunHealthAgentEvent) => options.onEvent?.(event);
+  const routing = {
+    module: options.module,
+    intentConfidence: options.intentConfidence,
+  };
   loadEnv(root);
-  const model = process.env.CURSOR_MODEL ?? "composer-2.5";
+  const model = process.env.CURSOR_MODEL?.trim() || DEFAULT_COACH_MODEL;
   const roundLog = createRoundLog();
   emit({ type: "stage", stage: "reading_profile", status: "active" });
   const taskReview = reviewTaskSafety(task);
@@ -225,14 +265,16 @@ async function runHealthAgentCore(
       verdict: taskReview.verdict,
       score: taskReview.score,
     });
-    return toResult(startedAt, model, "", taskReview, roundLog.snapshot(), []);
+    return toResult(startedAt, model, "", taskReview, roundLog.snapshot(), [], routing);
   }
 
   const apiKey = process.env.CURSOR_API_KEY;
   if (!apiKey) throw new Error("Добавь CURSOR_API_KEY в .env");
 
   const [coachPrompt, reviewerPrompt] = await Promise.all([
-    loadPrompt(root, "healthCoach", ACTIVE_PROMPTS.coach),
+    options.coachPrompt?.trim()
+      ? Promise.resolve(options.coachPrompt.trim())
+      : loadPrompt(root, "healthCoach", ACTIVE_PROMPTS.coach),
     loadPrompt(root, "safetyReviewer", ACTIVE_PROMPTS.reviewer),
   ]);
   const toolCalls: ToolCallRecord[] = [];
@@ -248,13 +290,16 @@ async function runHealthAgentCore(
       });
     }
   };
-  const coachTools = createLocalHealthCoachTools(root, recordToolCall);
+  const coachTools = createLocalHealthCoachTools(root, recordToolCall, options.allowedTools);
   const markdownMcp = await createMarkdownHealthMcpClient(root);
   const runtime: Runtime = {
     root,
     apiKey,
     model,
-    mcpServers: cursorMcpServers(root),
+    mcpServers: cursorMcpServers(root, {
+      allowedTools: options.allowedTools,
+      moduleName: options.module,
+    }),
     onToolCall: recordToolCall,
   };
   const coach = createHealthCoachAgent(coachPrompt);
@@ -288,21 +333,6 @@ async function runHealthAgentCore(
         emit({ type: "stage", stage: "revising", status: "complete", round });
       }
 
-      if (toolCalls.some((call) => call.name === "generateShoppingList")) {
-        emit({ type: "stage", stage: "reviewing_safety", status: "active", round });
-        emit({
-          type: "stage",
-          stage: "reviewing_safety",
-          status: "complete",
-          round,
-          verdict: SHOPPING_LIST_REVIEW.verdict,
-          score: SHOPPING_LIST_REVIEW.score,
-        });
-        emit({ type: "stage", stage: "final_approved_plan", status: "active" });
-        emit({ type: "stage", stage: "final_approved_plan", status: "complete" });
-        return toResult(startedAt, model, plan, SHOPPING_LIST_REVIEW, roundLog.snapshot(), toolCalls, "shopping_list");
-      }
-
       emit({ type: "stage", stage: "reviewing_safety", status: "active", round });
       const review = await askReviewer(runtime, reviewer, plan, round, maxRounds, issues);
       lastReview = review;
@@ -318,22 +348,22 @@ async function runHealthAgentCore(
       });
 
       if (review.verdict === "needs_human_professional") {
-        return toResult(startedAt, model, "", review, roundLog.snapshot(), toolCalls);
+        return toResult(startedAt, model, "", review, roundLog.snapshot(), toolCalls, routing);
       }
       if (review.verdict === "approve") {
         emit({ type: "stage", stage: "final_approved_plan", status: "active" });
-        // Harness owns persistence: an unreviewed draft cannot save itself, even though storage is MCP.
-        await saveApprovedPlanViaMcp(markdownMcp, plan);
-        const saveCall: ToolCallRecord = { name: "save_health_plan", source: "markdown-health" };
-        recordToolCall(saveCall);
+        await persistApprovedRun(markdownMcp, task, plan, options.module ?? "general", recordToolCall);
         emit({ type: "stage", stage: "final_approved_plan", status: "complete" });
-        return toResult(startedAt, model, plan, review, roundLog.snapshot(), toolCalls);
+        return toResult(startedAt, model, plan, review, roundLog.snapshot(), toolCalls, {
+          ...routing,
+          resultKind: toolCalls.some((call) => call.name === "generateShoppingList") ? "shopping_list" : "plan",
+        });
       }
       issues = review.issues;
     }
 
     if (!lastReview) throw new Error("Reviewer не вернул результат.");
-    return toResult(startedAt, model, plan, lastReview, roundLog.snapshot(), toolCalls);
+    return toResult(startedAt, model, plan, lastReview, roundLog.snapshot(), toolCalls, routing);
   } finally {
     await markdownMcp.close();
   }

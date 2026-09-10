@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { runHealthAgent } from "../src/harness/runHealthAgent";
+import { runOS } from "../src/os/runOS";
 import type { RunTrace } from "../src/harness/traceRun";
 
 type ComparableValue = string | number;
@@ -70,13 +70,19 @@ async function main() {
 
   const tracePath = resolve(process.cwd(), traceArg);
   const oldTrace = await readTrace(tracePath);
-  const newRun = await runHealthAgent(oldTrace.task);
+  const newRun = await runOS(oldTrace.task);
 
   console.log(`Replay: ${traceArg}`);
   console.log(`Task: ${oldTrace.task}`);
   console.table([
     row("verdict", oldTrace.verdict, newRun.review.verdict),
     row("score", formatScore(oldTrace.finalScore), formatScore(newRun.finalScore)),
+    row("module", oldTrace.module ?? "-", newRun.module ?? "-"),
+    row(
+      "intentConfidence",
+      oldTrace.intentConfidence ?? "-",
+      newRun.intentConfidence ?? "-",
+    ),
     row("rounds", oldTrace.rounds.length, newRun.rounds.length),
     row("toolCalls", formatToolCalls(oldTrace.toolCalls), formatToolCalls(newRun.toolCalls)),
     row(

@@ -13,6 +13,8 @@ export type TraceableRunResult = {
   finalScore: number;
   review: Review;
   durationMs: number;
+  module?: string;
+  intentConfidence?: number;
 };
 
 export type RunTraceRound = {
@@ -32,6 +34,8 @@ export type RunTrace = {
   verdict: Review["verdict"];
   durationMs: number;
   createdAt: string;
+  module?: string;
+  intentConfidence?: number;
 };
 
 export type TraceRunParams = {
@@ -66,6 +70,8 @@ export function buildRunTrace(
     verdict: result.review.verdict,
     durationMs: result.durationMs,
     createdAt: createdAt.toISOString(),
+    module: result.module,
+    intentConfidence: result.intentConfidence,
   };
 }
 
