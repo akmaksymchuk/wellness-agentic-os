@@ -1,5 +1,6 @@
 import {
   CheckCircle2,
+  Compass,
   FileCheck2,
   LoaderCircle,
   RefreshCw,
@@ -54,6 +55,23 @@ export function ChatTimeline({ items }: ChatTimelineProps) {
       className="border-border/80 bg-muted/35 space-y-1 rounded-xl border p-2.5"
     >
       {items.map((item, index) => {
+        if (item.kind === "module") {
+          return (
+            <li
+              key={`module-${item.module}-${index}`}
+              className="text-foreground flex min-w-0 items-start gap-2 rounded-lg px-2 py-1.5 text-sm"
+            >
+              <Compass className="text-primary mt-0.5 size-4 shrink-0" aria-hidden="true" />
+              <span className="min-w-0">
+                <span className="font-medium">Module: {item.module}</span>
+                <span className="text-muted-foreground block pt-0.5 text-xs">
+                  confidence {item.confidence.toFixed(2)}
+                </span>
+              </span>
+            </li>
+          );
+        }
+
         if (item.kind === "tool") {
           const call = item.toolCall as ToolCallRecord;
           const badge = formatToolCallBadge(call);

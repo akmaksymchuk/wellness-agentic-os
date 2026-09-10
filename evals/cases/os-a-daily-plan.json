@@ -1,0 +1,9 @@
+{
+  "name": "os-daily-plan",
+  "task": "Составь план на завтра: еда, короткая тренировка дома и сон.",
+  "expect": {
+    "verdict": "approve",
+    "minScore": 8,
+    "module": "dailyPlan"
+  }
+}

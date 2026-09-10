@@ -1,7 +1,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { runHealthAgent } from "../src/harness/runHealthAgent";
 import type { Review } from "../src/harness/validateReview";
+import { runOS } from "../src/os/runOS";
 
 type ExpectedVerdict = Extract<Review["verdict"], "approve" | "needs_human_professional">;
 
@@ -11,6 +11,7 @@ type EvalCase = {
   expect: {
     verdict: ExpectedVerdict;
     minScore?: number;
+    module?: string;
     retrieval?: {
       minChunks: number;
       file?: string;
@@ -24,6 +25,7 @@ type EvalRow = {
   expected: string;
   actual: string;
   score: string;
+  module: string;
   rounds: number | "-";
   toolCalls: number | "-";
   retrieval: string;
@@ -54,6 +56,13 @@ function assertEvalCase(value: unknown, file: string): asserts value is EvalCase
     (typeof expect.minScore !== "number" || !Number.isFinite(expect.minScore))
   ) {
     throw new Error(`${file}: expect.minScore must be a finite number.`);
+  }
+  if (
+    "module" in expect &&
+    typeof expect.module !== "undefined" &&
+    (typeof expect.module !== "string" || !expect.module.trim())
+  ) {
+    throw new Error(`${file}: expect.module must be a non-empty string.`);
   }
   if (typeof expect.retrieval !== "undefined") {
     if (!expect.retrieval || typeof expect.retrieval !== "object" || Array.isArray(expect.retrieval)) {
@@ -92,6 +101,9 @@ function formatExpected(testCase: EvalCase) {
   if (typeof testCase.expect.minScore === "number") {
     expected.push(`score >= ${testCase.expect.minScore}`);
   }
+  if (testCase.expect.module) {
+    expected.push(`module=${testCase.expect.module}`);
+  }
   if (testCase.expect.retrieval) {
     const file = testCase.expect.retrieval.file?.trim();
     expected.push(
@@ -103,7 +115,7 @@ function formatExpected(testCase: EvalCase) {
 
 async function runCase(root: string, testCase: EvalCase): Promise<EvalRow> {
   try {
-    const result = await runHealthAgent(testCase.task, { root });
+    const result = await runOS(testCase.task, { root });
     const score = result.finalScore ?? result.review.score;
     const verdictMatches = result.review.verdict === testCase.expect.verdict;
     const scoreMatches =
@@ -122,7 +134,9 @@ async function runCase(root: string, testCase: EvalCase): Promise<EvalRow> {
     const retrievalMatches =
       !retrievalExpected ||
       (knowledgeCalls.length > 0 && matchingChunks.length >= retrievalExpected.minChunks);
-    const passed = verdictMatches && scoreMatches && safetyGateStopped && retrievalMatches;
+    const expectedModule = testCase.expect.module?.trim();
+    const moduleMatches = !expectedModule || result.module === expectedModule;
+    const passed = verdictMatches && scoreMatches && safetyGateStopped && retrievalMatches && moduleMatches;
     const note = passed
       ? ""
       : !verdictMatches
@@ -131,11 +145,13 @@ async function runCase(root: string, testCase: EvalCase): Promise<EvalRow> {
           ? "score below minScore"
           : !safetyGateStopped
             ? "safety gate did not stop before coach"
-            : knowledgeCalls.length === 0
-              ? "retrieval not called"
-              : expectedFile && matchingChunks.length === 0
-                ? "expected file missing"
-                : "too few matching chunks";
+            : !moduleMatches
+              ? `module mismatch (${result.module ?? "none"})`
+              : knowledgeCalls.length === 0
+                ? "retrieval not called"
+                : expectedFile && matchingChunks.length === 0
+                  ? "expected file missing"
+                  : "too few matching chunks";
 
     return {
       status: passed ? "PASS" : "FAIL",
@@ -143,6 +159,7 @@ async function runCase(root: string, testCase: EvalCase): Promise<EvalRow> {
       expected: formatExpected(testCase),
       actual: result.review.verdict,
       score: String(score),
+      module: result.module ?? "-",
       rounds: result.rounds.length,
       toolCalls: result.toolCalls.length,
       retrieval: knowledgeCalls.length
@@ -157,6 +174,7 @@ async function runCase(root: string, testCase: EvalCase): Promise<EvalRow> {
       expected: formatExpected(testCase),
       actual: "error",
       score: "-",
+      module: "-",
       rounds: "-",
       toolCalls: "-",
       retrieval: "-",

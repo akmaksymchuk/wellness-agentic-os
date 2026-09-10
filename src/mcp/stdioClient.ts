@@ -91,10 +91,51 @@ function toCursorConfig(spawn: ResolvedMcpSpawn): McpServerConfig {
   };
 }
 
-/** Inline stdio map for `@cursor/sdk`. The SDK, not harness, spawns these processes for the coach. */
-export function cursorMcpServers(root: string): Record<string, McpServerConfig> {
+export type CursorMcpServersOptions = {
+  allowedTools?: string[];
+  moduleName?: string;
+};
+
+const MARKDOWN_COACH_TOOL_SET = new Set<string>(HEALTH_COACH_MCP_TOOLS);
+
+function markdownCoachTools(allowedTools?: string[]): string[] {
+  if (!allowedTools?.length) return [...HEALTH_COACH_MCP_TOOLS];
+  return HEALTH_COACH_MCP_TOOLS.filter((name) => allowedTools.includes(name));
+}
+
+function shouldIncludeMcpServer(config: HealthMcpServerConfig, allowedTools?: string[]): boolean {
+  if (!allowedTools?.length) return true;
+  if (config.name === MARKDOWN_HEALTH_MCP_NAME) {
+    return (
+      allowedTools.includes(config.name) || allowedTools.some((name) => MARKDOWN_COACH_TOOL_SET.has(name))
+    );
+  }
+  return allowedTools.includes(config.name);
+}
+
+/**
+ * Inline stdio map for `@cursor/sdk`.
+ * markdown-health is keyed by module so a process-level tool-list cache cannot reuse
+ * another module's filtered list (habits after recipes in the same eval process).
+ */
+export function cursorMcpServers(
+  root: string,
+  options: CursorMcpServersOptions = {},
+): Record<string, McpServerConfig> {
+  const moduleName = options.moduleName?.trim() || "general";
+
   return Object.fromEntries(
-    enabledHealthMcpConfigs().map((config) => [config.name, toCursorConfig(resolveHealthMcpSpawn(root, config))]),
+    enabledHealthMcpConfigs()
+      .filter((config) => shouldIncludeMcpServer(config, options.allowedTools))
+      .map((config) => {
+        const spawnConfig =
+          config.name === MARKDOWN_HEALTH_MCP_NAME
+            ? { ...config, allowedTools: markdownCoachTools(options.allowedTools) }
+            : config;
+        const key =
+          config.name === MARKDOWN_HEALTH_MCP_NAME ? `${config.name}-${moduleName}` : config.name;
+        return [key, toCursorConfig(resolveHealthMcpSpawn(root, spawnConfig))];
+      }),
   );
 }
 

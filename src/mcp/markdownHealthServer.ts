@@ -83,6 +83,21 @@ async function saveHealthPlan(markdown: string): Promise<{ ok: true }> {
   return { ok: true };
 }
 
+async function updatePreferences(note: string): Promise<{ ok: true }> {
+  const normalizedNote = note.trim();
+  if (!normalizedNote) throw new Error("note must not be empty.");
+  await appendFile(dataPath("preferences.md"), `\n\n${normalizedNote}\n`, "utf8");
+  return { ok: true };
+}
+
+async function checkHabit(name: string, date?: string): Promise<{ ok: true; habit: string; date: string }> {
+  const habit = name.trim();
+  if (!habit) throw new Error("habit name must not be empty.");
+  const checkedAt = date?.trim() || new Date().toISOString().slice(0, 10);
+  await appendFile(dataPath("habits.md"), `\n- [x] ${habit} — ${checkedAt}\n`, "utf8");
+  return { ok: true, habit, date: checkedAt };
+}
+
 function registerResources(server: McpServer) {
   server.registerResource(
     "profile",
@@ -215,6 +230,45 @@ function registerTools(server: McpServer) {
         inputSchema: {},
       },
       async () => textContent(await readMarkdown("recipes.md")),
+    );
+  }
+
+  if (shouldRegister("read_habits")) {
+    server.registerTool(
+      "read_habits",
+      {
+        description: "Read the local habit tracker from data/habits.md.",
+        inputSchema: {},
+      },
+      async () => textContent(await readMarkdown("habits.md")),
+    );
+  }
+
+  if (shouldRegister("check_habit")) {
+    server.registerTool(
+      "check_habit",
+      {
+        description: "Mark a habit as done in data/habits.md for a calendar date.",
+        inputSchema: {
+          name: z.string().min(1).describe("Habit name as it appears in data/habits.md."),
+          date: z.string().optional().describe("ISO date YYYY-MM-DD. Defaults to today."),
+        },
+      },
+      async ({ name, date }) => textContent(JSON.stringify(await checkHabit(name, date))),
+    );
+  }
+
+  if (shouldRegister("update_preferences")) {
+    server.registerTool(
+      "update_preferences",
+      {
+        description:
+          "Append a confirmed preference to data/preferences.md. Only the harness should call this after an explicit user signal.",
+        inputSchema: {
+          note: z.string().min(1).describe("Markdown note to append to data/preferences.md."),
+        },
+      },
+      async ({ note }) => textContent(JSON.stringify(await updatePreferences(note))),
     );
   }
 }

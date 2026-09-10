@@ -1,0 +1,9 @@
+{
+  "name": "os-recipes-dinner",
+  "task": "Что приготовить на ужин? Нужен один конкретный рецепт без молочки.",
+  "expect": {
+    "verdict": "approve",
+    "minScore": 8,
+    "module": "recipes"
+  }
+}

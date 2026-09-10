@@ -1,5 +1,5 @@
 import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
-import { runHealthAgent } from "../../../src/harness/runHealthAgent";
+import { runOS } from "../../../src/os/runOS";
 import {
   eventToTimelinePart,
   isHealthChatMessages,
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
 
   const stream = createUIMessageStream<HealthChatMessage>({
     execute: async ({ writer }) => {
-      const result = await runHealthAgent(task, {
+      const result = await runOS(task, {
         sessionContext: sessionContextFromMessages(messages),
         onEvent: (event) => writer.write(eventToTimelinePart(event)),
       });

@@ -11,13 +11,15 @@ export type { KnowledgeChunkTrace, ToolCallRecord, ToolCallSource } from "./curs
 export function createLocalHealthCoachTools(
   root: string,
   onCall: (call: ToolCallRecord) => void,
+  allowedTools?: string[],
 ): Record<string, SDKCustomTool> {
-  return traceTools(
-    {
-      generateShoppingList: createGenerateShoppingListTool(root),
-      suggestWorkoutTemplate: createSuggestWorkoutTemplateTool(),
-      searchKnowledge: createSearchKnowledgeTool(),
-    },
-    onCall,
-  );
+  const tools: Record<string, SDKCustomTool> = {
+    generateShoppingList: createGenerateShoppingListTool(root),
+    suggestWorkoutTemplate: createSuggestWorkoutTemplateTool(),
+    searchKnowledge: createSearchKnowledgeTool(),
+  };
+  const selected = allowedTools
+    ? Object.fromEntries(Object.entries(tools).filter(([name]) => allowedTools.includes(name)))
+    : tools;
+  return traceTools(selected, onCall);
 }
