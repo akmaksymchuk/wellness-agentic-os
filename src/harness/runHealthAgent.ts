@@ -31,10 +31,35 @@ export type RunHealthAgentResult = {
   durationMs: number;
 };
 
+export type HealthAgentStage =
+  | "reading_profile"
+  | "searching_knowledge"
+  | "generating_plan"
+  | "reviewing_safety"
+  | "revising"
+  | "final_approved_plan";
+
+export type RunHealthAgentEvent =
+  | {
+      type: "stage";
+      stage: HealthAgentStage;
+      status: "active" | "complete";
+      round?: number;
+      query?: string;
+      verdict?: Review["verdict"];
+      score?: number;
+    }
+  | {
+      type: "tool_call";
+      toolCall: ToolCallRecord;
+    };
+
 export type RunHealthAgentOptions = {
   root?: string;
   maxRounds?: number;
+  sessionContext?: string;
   onRound?: (round: number, review: Review) => void;
+  onEvent?: (event: RunHealthAgentEvent) => void;
 };
 
 type Runtime = {
@@ -92,10 +117,22 @@ function ask(
   });
 }
 
+function buildTaskPrompt(task: string, sessionContext?: string) {
+  const context = sessionContext?.trim();
+  return context
+    ? `Контекст текущей сессии:\n${context}\n\nЗадача пользователя:\n${task}`.trim()
+    : `Задача пользователя:\n${task}`.trim();
+}
+
+function knowledgeQuery(call: ToolCallRecord): string | undefined {
+  return typeof call.args?.query === "string" ? call.args.query : undefined;
+}
+
 async function askCoach(
   runtime: Runtime,
   agent: PromptAgent,
   task: string,
+  sessionContext: string | undefined,
   previousPlan: string,
   issues: string[],
   customTools: Record<string, SDKCustomTool>,
@@ -103,7 +140,7 @@ async function askCoach(
   const revision = issues.length
     ? `\n\nПредыдущий план:\n${previousPlan}\n\nЗамечания Safety Reviewer:\n${issues.map((issue) => `- ${issue}`).join("\n")}\n\nИсправь план с учетом замечаний. Верни только обновленный план.`
     : "";
-  return ask(runtime, agent, `Задача пользователя:\n${task}${revision}`, customTools);
+  return ask(runtime, agent, `${buildTaskPrompt(task, sessionContext)}${revision}`, customTools);
 }
 
 async function askReviewer(
@@ -168,13 +205,26 @@ async function runHealthAgentCore(
 ): Promise<RunHealthAgentResult> {
   const startedAt = Date.now();
   const maxRounds = options.maxRounds ?? DEFAULT_MAX_ROUNDS;
+  const sessionContext = options.sessionContext?.trim() || undefined;
+  const emit = (event: RunHealthAgentEvent) => options.onEvent?.(event);
   loadEnv(root);
   const model = process.env.CURSOR_MODEL ?? "composer-2.5";
   const roundLog = createRoundLog();
+  emit({ type: "stage", stage: "reading_profile", status: "active" });
   const taskReview = reviewTaskSafety(task);
   if (taskReview) {
     const recorded = roundLog.record("", taskReview);
     options.onRound?.(recorded.round, taskReview);
+    emit({ type: "stage", stage: "reading_profile", status: "complete" });
+    emit({ type: "stage", stage: "reviewing_safety", status: "active", round: 1 });
+    emit({
+      type: "stage",
+      stage: "reviewing_safety",
+      status: "complete",
+      round: 1,
+      verdict: taskReview.verdict,
+      score: taskReview.score,
+    });
     return toResult(startedAt, model, "", taskReview, roundLog.snapshot(), []);
   }
 
@@ -186,45 +236,97 @@ async function runHealthAgentCore(
     loadPrompt(root, "safetyReviewer", ACTIVE_PROMPTS.reviewer),
   ]);
   const toolCalls: ToolCallRecord[] = [];
-  const coachTools = createLocalHealthCoachTools(root, (call) => {
+  const recordToolCall = (call: ToolCallRecord) => {
     toolCalls.push(call);
-  });
+    emit({ type: "tool_call", toolCall: call });
+    if (call.name === "searchKnowledge") {
+      emit({
+        type: "stage",
+        stage: "searching_knowledge",
+        status: "active",
+        query: knowledgeQuery(call),
+      });
+    }
+  };
+  const coachTools = createLocalHealthCoachTools(root, recordToolCall);
   const markdownMcp = await createMarkdownHealthMcpClient(root);
   const runtime: Runtime = {
     root,
     apiKey,
     model,
     mcpServers: cursorMcpServers(root),
-    onToolCall: (call) => {
-      toolCalls.push(call);
-    },
+    onToolCall: recordToolCall,
   };
   const coach = createHealthCoachAgent(coachPrompt);
   const reviewer = createSafetyReviewerAgent(reviewerPrompt);
   let plan = "";
   let issues: string[] = [];
   let lastReview: Review | null = null;
+  emit({ type: "stage", stage: "reading_profile", status: "complete" });
 
   try {
     for (let round = 1; round <= maxRounds; round += 1) {
-      plan = await askCoach(runtime, coach, task, plan, issues, coachTools);
+      if (round > 1) {
+        emit({ type: "stage", stage: "revising", status: "active", round });
+      }
+      emit({ type: "stage", stage: "searching_knowledge", status: "active" });
+      emit({ type: "stage", stage: "generating_plan", status: "active" });
+
+      const beforeCalls = toolCalls.length;
+      plan = await askCoach(runtime, coach, task, sessionContext, plan, issues, coachTools);
+      const roundCalls = toolCalls.slice(beforeCalls);
+      const knowledgeCall = roundCalls.find((call) => call.name === "searchKnowledge");
+
+      emit({
+        type: "stage",
+        stage: "searching_knowledge",
+        status: "complete",
+        query: knowledgeCall ? knowledgeQuery(knowledgeCall) : undefined,
+      });
+      emit({ type: "stage", stage: "generating_plan", status: "complete" });
+      if (round > 1) {
+        emit({ type: "stage", stage: "revising", status: "complete", round });
+      }
 
       if (toolCalls.some((call) => call.name === "generateShoppingList")) {
+        emit({ type: "stage", stage: "reviewing_safety", status: "active", round });
+        emit({
+          type: "stage",
+          stage: "reviewing_safety",
+          status: "complete",
+          round,
+          verdict: SHOPPING_LIST_REVIEW.verdict,
+          score: SHOPPING_LIST_REVIEW.score,
+        });
+        emit({ type: "stage", stage: "final_approved_plan", status: "active" });
+        emit({ type: "stage", stage: "final_approved_plan", status: "complete" });
         return toResult(startedAt, model, plan, SHOPPING_LIST_REVIEW, roundLog.snapshot(), toolCalls, "shopping_list");
       }
 
+      emit({ type: "stage", stage: "reviewing_safety", status: "active", round });
       const review = await askReviewer(runtime, reviewer, plan, round, maxRounds, issues);
       lastReview = review;
       roundLog.record(plan, review);
       options.onRound?.(round, review);
+      emit({
+        type: "stage",
+        stage: "reviewing_safety",
+        status: "complete",
+        round,
+        verdict: review.verdict,
+        score: review.score,
+      });
 
       if (review.verdict === "needs_human_professional") {
         return toResult(startedAt, model, "", review, roundLog.snapshot(), toolCalls);
       }
       if (review.verdict === "approve") {
+        emit({ type: "stage", stage: "final_approved_plan", status: "active" });
         // Harness owns persistence: an unreviewed draft cannot save itself, even though storage is MCP.
         await saveApprovedPlanViaMcp(markdownMcp, plan);
-        toolCalls.push({ name: "save_health_plan", source: "markdown-health" });
+        const saveCall: ToolCallRecord = { name: "save_health_plan", source: "markdown-health" };
+        recordToolCall(saveCall);
+        emit({ type: "stage", stage: "final_approved_plan", status: "complete" });
         return toResult(startedAt, model, plan, review, roundLog.snapshot(), toolCalls);
       }
       issues = review.issues;

@@ -1,384 +1,152 @@
 "use client";
 
-import { type FormEvent, useState } from "react";
-import {
-  Check,
-  CircleCheckBig,
-  Copy,
-  Loader2,
-  ShieldAlert,
-  Sparkles,
-} from "lucide-react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
+import { DefaultChatTransport } from "ai";
+import { useChat } from "@ai-sdk/react";
+import { Loader2, Plus, SendHorizontal, Sparkles } from "lucide-react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { ChatError, ChatMessage } from "@/components/chat/chat-message";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
-import {
-  IssuesHistory,
-  RoundsHistory,
-  RoundsIndicator,
-  RunMeta,
-  ScoreMeter,
-  ToolCallsList,
-  VerdictBadge,
-  verdictConfig,
-  type ReviewVerdict,
-  type ToolCallRecord,
-} from "@/components/health/review-widgets";
+import { healthChatDataSchemas, type HealthChatMessage } from "@/src/chat/messages";
 
-type ReviewPayload = {
-  verdict: ReviewVerdict;
-  score: number;
-  issues: string[];
-};
-
-type AgentResult = {
-  resultKind?: "plan" | "shopping_list";
-  plan: string;
-  review: ReviewPayload;
-  rounds: Array<{
-    round: number;
-    plan: string;
-    review: ReviewPayload;
-  }>;
-  finalScore: number;
-  improved: boolean;
-  promptVersions: {
-    coach: string;
-    reviewer: string;
-  };
-  toolCalls: ToolCallRecord[];
-  durationMs: number;
-};
-
-type Status = "idle" | "running" | "result";
-
-const statusMeta: Record<Status, { label: string; dot: string }> = {
-  idle: { label: "Готов", dot: "bg-muted-foreground/50" },
-  running: { label: "Выполняется", dot: "bg-primary animate-pulse" },
-  result: { label: "Готово", dot: "bg-emerald-500" },
-};
-
-const reviewSteps = ["Черновик", "Ревью", "Правки", "Финал"];
-
-const isProfessionalVerdict = (result: AgentResult | null) =>
-  result?.review.verdict === "needs_human_professional";
+const chatTransport = new DefaultChatTransport<HealthChatMessage>({
+  api: "/api/chat",
+});
 
 export default function Page() {
-  const [task, setTask] = useState("");
-  const [status, setStatus] = useState<Status>("idle");
-  const [result, setResult] = useState<AgentResult | null>(null);
-  const [error, setError] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [input, setInput] = useState("");
+  const [inputError, setInputError] = useState("");
+  const endRef = useRef<HTMLDivElement>(null);
+  const { messages, sendMessage, setMessages, status, error, clearError } = useChat<HealthChatMessage>({
+    transport: chatTransport,
+    dataPartSchemas: healthChatDataSchemas,
+  });
+  const isRunning = status === "submitted" || status === "streaming";
 
-  const isRunning = status === "running";
+  useEffect(() => {
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    endRef.current?.scrollIntoView({
+      behavior: reduceMotion ? "auto" : "smooth",
+      block: "end",
+    });
+  }, [messages, status]);
 
-  async function runAgent(event: FormEvent<HTMLFormElement>) {
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const trimmedTask = task.trim();
-    if (isRunning) return;
+    const text = input.trim();
 
-    if (!trimmedTask) {
-      setError("Опишите задачу, чтобы запустить агента.");
+    if (isRunning) return;
+    if (!text) {
+      setInputError("Опишите задачу для Health Coach.");
       return;
     }
 
-    setStatus("running");
-    setResult(null);
-    setError("");
-    setCopied(false);
-
-    try {
-      const response = await fetch("/api/agent/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task: trimmedTask }),
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? "Не удалось запустить агента.");
-      setResult(payload);
-      setStatus("result");
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Не удалось запустить агента.");
-      setStatus("idle");
-    }
+    setInputError("");
+    clearError();
+    setInput("");
+    void sendMessage({ text }).catch(() => undefined);
   }
 
-  async function copyPlan() {
-    if (!result?.plan) return;
-    try {
-      await navigator.clipboard.writeText(result.plan);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setError("Не удалось скопировать план.");
-    }
+  function startNewSession() {
+    if (isRunning) return;
+    setMessages([]);
+    setInput("");
+    setInputError("");
+    clearError();
   }
-
-  const status_ = statusMeta[status];
 
   return (
     <>
       <a
-        href="#task"
+        href="#composer"
         className="bg-primary text-primary-foreground focus:ring-ring sr-only rounded-md px-4 py-2 text-sm font-medium focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50 focus:ring-2"
       >
-        К задаче
+        К сообщению
       </a>
 
-      <main
-        id="main-content"
-        className="mx-auto w-full max-w-5xl px-4 py-10 sm:px-6 sm:py-14"
-      >
-        <header className="flex flex-wrap items-end justify-between gap-4">
-          <div className="space-y-2">
+      <main className="mx-auto flex h-dvh w-full max-w-3xl flex-col px-3 sm:px-6">
+        <header className="border-border flex shrink-0 items-center justify-between gap-4 border-b py-4 sm:py-5">
+          <div className="min-w-0">
             <p className="text-primary flex items-center gap-1.5 text-xs font-semibold tracking-[0.14em] uppercase">
               <Sparkles className="size-3.5" aria-hidden="true" />
-              Local wellness runner
+              Wellness companion
             </p>
-            <h1 className="text-foreground text-3xl font-semibold tracking-tight sm:text-4xl">
-              Health Coach Agent
-            </h1>
-            <p className="text-muted-foreground max-w-prose text-sm">
-              Опишите цель — коуч составит wellness-план, а ревьюер проверит его
-              на безопасность перед выдачей.
-            </p>
+            <h1 className="text-foreground mt-1 text-xl font-semibold tracking-tight sm:text-2xl">Health Coach</h1>
           </div>
-
-          <div
-            aria-live="polite"
-            className="border-border bg-card inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium shadow-sm"
-          >
-            <span
-              aria-hidden="true"
-              className={cn("size-2 rounded-full", status_.dot)}
-            />
-            {status_.label}
-          </div>
+          <Button type="button" variant="outline" onClick={startNewSession} disabled={isRunning}>
+            <Plus aria-hidden="true" />
+            Новая сессия
+          </Button>
         </header>
 
-        <div className="mt-8 grid gap-6 lg:grid-cols-[1.35fr_1fr]">
-          {/* Форма задачи */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Задача для агента</CardTitle>
-              <CardDescription>
-                Например: план питания и активности на завтра.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={runAgent} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="task">Опишите цель</Label>
-                  <Textarea
-                    id="task"
-                    name="task"
-                    autoComplete="off"
-                    disabled={isRunning}
-                    onChange={(event) => setTask(event.target.value)}
-                    placeholder="Например: составь план питания и активности на завтра…"
-                    required
-                    rows={8}
-                    value={task}
-                    className="resize-y"
-                  />
+        <section
+          id="chat-feed"
+          aria-label="Переписка с Health Coach"
+          className="min-h-0 flex-1 overflow-y-auto py-6 sm:py-8"
+        >
+          {messages.length ? (
+            <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 sm:gap-5">
+              {messages.map((message) => (
+                <ChatMessage key={message.id} message={message} />
+              ))}
+              {error ? <ChatError message={error.message} /> : null}
+              <div ref={endRef} aria-hidden="true" />
+            </div>
+          ) : (
+            <div className="mx-auto flex h-full max-w-md flex-col justify-center pb-20 text-center">
+              <Sparkles className="text-primary mx-auto size-7" aria-hidden="true" />
+              <h2 className="text-foreground mt-4 text-lg font-semibold">Ваш wellness-план начинается здесь</h2>
+              <p className="text-muted-foreground mt-2 text-sm leading-6">
+                Опишите цель — коуч изучит контекст, проверит план на безопасность и покажет ход работы в этом чате.
+              </p>
+              {error ? (
+                <div className="mt-5">
+                  <ChatError message={error.message} />
                 </div>
+              ) : null}
+              <div ref={endRef} aria-hidden="true" />
+            </div>
+          )}
+        </section>
 
-                <Button
-                  type="submit"
-                  size="lg"
-                  disabled={isRunning}
-                  aria-busy={isRunning}
-                  className="w-full sm:w-auto"
-                >
-                  {isRunning ? (
-                    <>
-                      <Loader2 className="animate-spin" aria-hidden="true" />
-                      Агент работает…
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles aria-hidden="true" />
-                      Запустить агента
-                    </>
-                  )}
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
-
-          {/* Панель ревью безопасности */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Проверка безопасности</CardTitle>
-              <CardDescription>Ревью коуч → ревьюер</CardDescription>
-              <CardAction>
-                {result ? (
-                  <VerdictBadge verdict={result.review.verdict} />
-                ) : (
-                  <span className="text-muted-foreground text-xs font-medium">
-                    {isRunning ? "Идёт проверка…" : "В очереди"}
-                  </span>
-                )}
-              </CardAction>
-            </CardHeader>
-            <CardContent>
-              {result ? (
-                <div className="space-y-5">
-                  {result.resultKind === "shopping_list" ? null : (
-                    <>
-                      <ScoreMeter
-                        score={result.review.score}
-                        tone={verdictConfig[result.review.verdict].meter}
-                      />
-                      <Separator />
-                      <RoundsIndicator rounds={result.rounds.length} />
-                      <Separator />
-                      <RoundsHistory rounds={result.rounds} />
-                      <Separator />
-                    </>
-                  )}
-                  <ToolCallsList toolCalls={result.toolCalls ?? []} />
-                  <Separator />
-                  <RunMeta
-                    durationMs={result.durationMs}
-                    promptVersions={result.promptVersions}
-                  />
-                  <Separator />
-                  {result.rounds.length ? (
-                    <IssuesHistory rounds={result.rounds} />
-                  ) : result.review.issues.length ? (
-                    <div className="space-y-2">
-                      <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                        Замечания
-                      </p>
-                      <ul className="space-y-2">
-                        {result.review.issues.map((issue) => (
-                          <li
-                            key={issue}
-                            className="text-foreground flex gap-2 text-sm leading-relaxed"
-                          >
-                            <span
-                              aria-hidden="true"
-                              className="bg-amber-500 mt-2 size-1.5 shrink-0 rounded-full"
-                            />
-                            {issue}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : (
-                    <p className="text-muted-foreground flex items-center gap-2 text-sm">
-                      <CircleCheckBig
-                        className="size-4 text-emerald-600"
-                        aria-hidden="true"
-                      />
-                      Замечаний нет
-                    </p>
-                  )}
-                </div>
-              ) : isRunning ? (
-                <div className="space-y-4" aria-hidden="true">
-                  <Skeleton className="h-2 w-full" />
-                  <Skeleton className="h-2 w-2/3" />
-                  <Separator />
-                  <Skeleton className="h-4 w-1/2" />
-                  <Skeleton className="h-4 w-3/4" />
-                </div>
-              ) : (
-                <ol className="space-y-3" aria-label="Порядок проверки">
-                  {reviewSteps.map((step, index) => (
-                    <li
-                      key={step}
-                      className="text-muted-foreground flex items-center gap-3 text-sm"
-                    >
-                      <span className="border-border text-muted-foreground flex size-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold tabular-nums">
-                        {index + 1}
-                      </span>
-                      {step}
-                    </li>
-                  ))}
-                </ol>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        {error ? (
-          <Alert variant="destructive" className="mt-6">
-            <ShieldAlert aria-hidden="true" />
-            <AlertTitle>Ошибка запуска</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        ) : null}
-
-        {status === "result" && result ? (
-          <section aria-label="Результат агента" className="mt-6">
-            {isProfessionalVerdict(result) ? (
-              <Alert variant="destructive">
-                <ShieldAlert aria-hidden="true" />
-                <AlertTitle>Нужна консультация специалиста</AlertTitle>
-                <AlertDescription>
-                  <p>
-                    Этот запрос выходит за рамки безопасного wellness-плана.
-                    Обратитесь к квалифицированному специалисту.
-                  </p>
-                </AlertDescription>
-              </Alert>
-            ) : (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">
-                    {result.resultKind === "shopping_list" ? "Список покупок" : "Финальный план"}
-                  </CardTitle>
-                  <CardDescription>
-                    {result.resultKind === "shopping_list"
-                      ? "Составлен инструментом generateShoppingList"
-                      : "Одобрен ревьюером безопасности"}
-                  </CardDescription>
-                  <CardAction>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={copyPlan}
-                      aria-label="Копировать план"
-                    >
-                      {copied ? (
-                        <>
-                          <Check aria-hidden="true" />
-                          Скопировано
-                        </>
-                      ) : (
-                        <>
-                          <Copy aria-hidden="true" />
-                          Копировать
-                        </>
-                      )}
-                    </Button>
-                  </CardAction>
-                </CardHeader>
-                <CardContent>
-                  <pre className="bg-muted/50 text-foreground overflow-x-auto rounded-lg p-4 font-mono text-sm leading-relaxed whitespace-pre-wrap">
-                    {result.plan}
-                  </pre>
-                </CardContent>
-              </Card>
-            )}
-          </section>
-        ) : null}
+        <form id="composer" onSubmit={handleSubmit} className="border-border bg-background/95 shrink-0 border-t py-3 backdrop-blur sm:py-4">
+          <div className="border-border bg-card focus-within:ring-ring flex items-end gap-2 rounded-xl border p-2 shadow-sm focus-within:ring-2">
+            <label htmlFor="message" className="sr-only">
+              Сообщение для Health Coach
+            </label>
+            <Textarea
+              id="message"
+              value={input}
+              onChange={(event) => {
+                setInput(event.target.value);
+                if (inputError) setInputError("");
+              }}
+              disabled={isRunning}
+              rows={2}
+              placeholder="Например: составь план питания и активности на завтра…"
+              className="min-h-12 flex-1 resize-none border-0 bg-transparent px-2 py-1.5 shadow-none focus-visible:ring-0"
+            />
+            <Button
+              type="submit"
+              size="icon"
+              disabled={isRunning || !input.trim()}
+              aria-busy={isRunning}
+              aria-label={isRunning ? "Health Coach работает" : "Отправить сообщение"}
+            >
+              {isRunning ? <Loader2 className="animate-spin" aria-hidden="true" /> : <SendHorizontal aria-hidden="true" />}
+            </Button>
+          </div>
+          {inputError ? (
+            <p role="alert" className="text-destructive mt-2 px-1 text-xs">
+              {inputError}
+            </p>
+          ) : (
+            <p className="text-muted-foreground mt-2 px-1 text-xs">
+              Во время запуска поле заблокировано. История хранится только в этой сессии.
+            </p>
+          )}
+        </form>
       </main>
     </>
   );

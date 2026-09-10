@@ -1,8 +1,8 @@
 # Local Wellness Agent
 
-Simple Next.js App Router UI for the Health Coach Agent and Safety Reviewer Agent loop.
+Simple Next.js App Router chat UI for the Health Coach Agent and Safety Reviewer Agent loop.
 
-Runtime uses Cursor SDK (`composer-2.5` by default) instead of DeepSeek / OpenAI Chat Completions. Cursor IDE + Composer is the coding tool; the coach/reviewer loop still runs in `src/harness/runHealthAgent.ts`.
+Runtime uses Cursor SDK (`composer-2.5` by default) instead of DeepSeek / OpenAI Chat Completions. Cursor IDE + Composer is the coding tool; the coach/reviewer loop still runs in `src/harness/runHealthAgent.ts`. The chat page streams harness stage events through `/api/chat` (Vercel AI SDK as transport only). The JSON endpoint `/api/agent/run` is unchanged.
 
 ## Setup
 
@@ -21,7 +21,7 @@ Runtime uses Cursor SDK (`composer-2.5` by default) instead of DeepSeek / OpenAI
 npm run dev
 ```
 
-Open `http://localhost:3000`, enter one task, and press `Run Agent`.
+Open `http://localhost:3000`, type a task in the chat, and send it. The timeline updates while the harness runs; the approved plan is then typed into the assistant message. History lives only in the page — reload or «Новая сессия» clears it. `POST /api/agent/run` still returns the full JSON result.
 
 The coach reads markdown data, optional filesystem access, weather forecasts, and
 Notion tools through MCP servers configured in `src/mcp/servers.config.ts`.

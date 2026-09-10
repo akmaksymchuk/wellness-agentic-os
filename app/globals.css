@@ -113,3 +113,110 @@
     text-rendering: optimizeLegibility;
   }
 }
+
+@keyframes chat-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.chat-pulse {
+  animation: chat-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes chat-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.chat-spin {
+  animation: chat-spin 1.2s linear infinite;
+}
+
+@layer components {
+  .markdown-content > * + * {
+    @apply mt-4;
+  }
+
+  .markdown-content h1 {
+    @apply text-foreground mt-7 text-xl font-semibold tracking-tight;
+  }
+
+  .markdown-content h2 {
+    @apply text-foreground mt-6 text-lg font-semibold tracking-tight;
+  }
+
+  .markdown-content h3 {
+    @apply text-foreground mt-5 text-base font-semibold;
+  }
+
+  .markdown-content p {
+    @apply text-foreground leading-6;
+  }
+
+  .markdown-content ul {
+    @apply list-disc space-y-1 pl-5;
+  }
+
+  .markdown-content ol {
+    @apply list-decimal space-y-1 pl-5;
+  }
+
+  .markdown-content li > ul,
+  .markdown-content li > ol {
+    @apply mt-1;
+  }
+
+  .markdown-content a {
+    @apply text-primary font-medium underline underline-offset-4;
+  }
+
+  .markdown-content strong {
+    @apply font-semibold;
+  }
+
+  .markdown-content blockquote {
+    @apply border-primary/40 text-muted-foreground border-l-2 pl-4 italic;
+  }
+
+  .markdown-content :not(pre) > code {
+    @apply bg-muted rounded px-1.5 py-0.5 text-[0.85em];
+  }
+
+  .markdown-content pre {
+    @apply bg-muted overflow-x-auto rounded-lg p-3 text-xs leading-5;
+  }
+
+  .markdown-content pre code {
+    @apply bg-transparent p-0;
+  }
+
+  .markdown-content hr {
+    @apply border-border my-6;
+  }
+
+  .markdown-content table {
+    @apply border-border my-4 w-full border-collapse text-left text-xs;
+  }
+
+  .markdown-content th {
+    @apply bg-muted text-foreground border-border border px-2 py-1.5 font-semibold;
+  }
+
+  .markdown-content td {
+    @apply border-border border px-2 py-1.5 align-top;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-pulse,
+  .chat-spin {
+    animation: none;
+  }
+}
